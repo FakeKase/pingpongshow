@@ -1,14 +1,9 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 11/23/2025
-// Design Name: Pong for Basys-3
-// Module Name: pong
-// Description: Full Pong game with VGA 640x480, frame-synced movement, reset,
-//              player (left) control, AI (right) paddle, and color rendering.
-// 
+// Pong for Basys-3 - corrected (on-screen score only)
+// - Uses your original variable names
+// - Removed invalid sevenseg instance
+// - SCORE_SCALE respected
 //////////////////////////////////////////////////////////////////////////////////
 
 module pong(
@@ -45,14 +40,6 @@ vga v(
     .blank(blank)
 );
 
-sevenseg SSG(
-    .clk(clk),
-    .digit0(score_left[3:0]),
-    .digit3(score_right[3:0]),
-    .seg(seg),
-    .an(an)
-);
-
 // -------------------------------------------------------------------------
 // 2. Frame tick generator (1 pulse per frame, ~60Hz)
 // -------------------------------------------------------------------------
@@ -81,6 +68,21 @@ localparam PAD_SPX    = 3;
 localparam PADP_SPX = 6;
 localparam PADP_SPY = 6;
 
+localparam SCORE_SCALE = 6;  // enlarge digit: 5x7 ? (5*6)x(7*6) = 30x42 pixels
+localparam DIGIT_W = 5 * SCORE_SCALE;
+localparam DIGIT_H = 7 * SCORE_SCALE;
+
+// ==========================================================
+// SCORE DISPLAY POSITIONS (NEW CODE)
+// ==========================================================
+localparam SCORE_WIDTH  = DIGIT_W;   // use DIGIT_W so SCORE_SCALE is respected
+localparam SCORE_HEIGHT = DIGIT_H;   // use DIGIT_H so SCORE_SCALE is respected
+
+localparam P1_SCORE_X = 250;
+localparam P2_SCORE_X = 370;
+localparam SCORE_Y    = 30;
+
+
 parameter NEW_GAME = 2'b00;
 parameter PLAY     = 2'b01;
 
@@ -101,29 +103,97 @@ reg [7:0] score_right = 0;
 // pixel combinational flags
 reg ball_pix, padl_pix, padr_pix;
 
+// ==========================================================
+// SCORE DIGIT DECODER (NEW CODE)
+// Converts player scores (0-9) into a 5?7 pixel bitmap
+// (this function returns a 35-bit pattern: 7 rows ? 5 cols = 35 bits)
+// bit order: top row left..right is the highest bits, down to bottom row
+// ==========================================================
+function [34:0] digit_bitmap;
+    input [3:0] value;
+    case (value)
+        4'd0: digit_bitmap = 35'b11111_10001_10001_10001_10001_10001_11111;
+        4'd1: digit_bitmap = 35'b00100_01100_00100_00100_00100_00100_01110;
+        4'd2: digit_bitmap = 35'b11111_00001_00001_11111_10000_10000_11111;
+        4'd3: digit_bitmap = 35'b11111_00001_00001_11111_00001_00001_11111;
+        4'd4: digit_bitmap = 35'b10001_10001_10001_11111_00001_00001_00001;
+        4'd5: digit_bitmap = 35'b11111_10000_10000_11111_00001_00001_11111;
+        4'd6: digit_bitmap = 35'b11111_10000_10000_11111_10001_10001_11111;
+        4'd7: digit_bitmap = 35'b11111_00001_00001_00001_00001_00001_00001;
+        4'd8: digit_bitmap = 35'b11111_10001_10001_11111_10001_10001_11111;
+        4'd9: digit_bitmap = 35'b11111_10001_10001_11111_00001_00001_11111;
+        default: digit_bitmap = 35'b0;
+    endcase
+endfunction
+
 // -------------------------------------------------------------------------
-// 5. Rendering logic
+// local regs for combinational indexing (sized explicitly)
+// -------------------------------------------------------------------------
+reg [2:0] row_idx;   // 0..6
+reg [2:0] col_idx;   // 0..4
+reg [5:0] bit_idx;   // 0..34
+
+// compute bitmaps as wires (avoid double function calls in expressions)
+wire [34:0] left_bitmap  = digit_bitmap(score_left[3:0]);
+wire [34:0] right_bitmap = digit_bitmap(score_right[3:0]);
+
+// -------------------------------------------------------------------------
+// 5. Rendering logic (fixed)
 // -------------------------------------------------------------------------
 always @(*) begin
-    // ball rectangle
-    ball_pix = (x >= ball_x) && (x < ball_x + BALL_SIZE) &&
-               (y >= ball_y) && (y < ball_y + BALL_SIZE);
-    
-    // left paddle rectangle
-    padl_pix = (x >= padl_x) && (x < padl_x + PAD_WIDTH) &&
-               (y >= padl_y) && (y < padl_y + PADP_HEIGHT);
-    
-    // right paddle rectangle
-    padr_pix = (x >= SCREEN_W - PAD_OFFS - PAD_WIDTH) && (x < SCREEN_W - PAD_OFFS) &&
-               (y >= padr_y) && (y < padr_y + PAD_HEIGHT);
-    
-    // assign color
-    if (ball_pix)
-        color = 12'h0F0;      // green ball
-    else if (padl_pix || padr_pix)
-        color = 12'hFFF;      // white paddles
-    else
-        color = 12'h000;      // black background
+    // default background
+    color = 12'h000;
+
+    // -----------------------------
+    // Draw left player's score (use SCORE_SCALE)
+    // -----------------------------
+    if ((x >= P1_SCORE_X) && (x < P1_SCORE_X + SCORE_WIDTH) &&
+        (y >= SCORE_Y)     && (y < SCORE_Y + SCORE_HEIGHT)) begin
+
+        // compute which source pixel in 5x7 bitmap this maps to
+        row_idx = (y - SCORE_Y) / SCORE_SCALE;    // 0..6
+        col_idx = (x - P1_SCORE_X) / SCORE_SCALE; // 0..4
+        bit_idx = row_idx * 5 + col_idx;          // 0..34
+
+        // index from MSB down: [34 - bit_idx]
+        if (left_bitmap[34 - bit_idx])
+            color = 12'hFFF; // white
+    end
+
+    // -----------------------------
+    // Draw right player's score
+    // -----------------------------
+    else if ((x >= P2_SCORE_X) && (x < P2_SCORE_X + SCORE_WIDTH) &&
+             (y >= SCORE_Y)     && (y < SCORE_Y + SCORE_HEIGHT)) begin
+
+        row_idx = (y - SCORE_Y) / SCORE_SCALE;
+        col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
+        bit_idx = row_idx * 5 + col_idx;
+
+        if (right_bitmap[34 - bit_idx])
+            color = 12'hFFF; // white
+    end
+
+    // -----------------------------
+    // Ball and paddles (original priority)
+    // -----------------------------
+    else begin
+        ball_pix = (x >= ball_x) && (x < ball_x + BALL_SIZE) &&
+                   (y >= ball_y) && (y < ball_y + BALL_SIZE);
+
+        padl_pix = (x >= padl_x) && (x < padl_x + PAD_WIDTH) &&
+                   (y >= padl_y) && (y < padl_y + PADP_HEIGHT);
+
+        padr_pix = (x >= SCREEN_W - PAD_OFFS - PAD_WIDTH) && (x < SCREEN_W - PAD_OFFS) &&
+                   (y >= padr_y) && (y < padr_y + PAD_HEIGHT);
+
+        if (ball_pix)
+            color = 12'h0F0;      // green ball
+        else if (padl_pix || padr_pix)
+            color = 12'hFFF;      // white paddles
+        else
+            color = 12'h000;      // black background
+    end
 end
 
 // assign VGA outputs
@@ -221,7 +291,7 @@ always @(posedge clk) begin
                 
                 // --- Player paddle control ---
                 if (btn_dn) begin
-                    if (padl_y + PAD_HEIGHT + PADP_SPY >= SCREEN_H)
+                    if (padl_y + PADP_HEIGHT + PADP_SPY >= SCREEN_H)
                         padl_y <= SCREEN_H - PADP_HEIGHT;
                     else
                         padl_y <= padl_y + PADP_SPY;

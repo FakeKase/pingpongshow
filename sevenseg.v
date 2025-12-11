@@ -20,48 +20,29 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module sevenseg(
-    input clk,
-    input [3:0] digit0,
-    input [3:0] digit3,
-    output reg [6:0] seg,
-    output reg [3:0] an
+    input [3:0] digit,
+    input [2:0] dx,   // 0..4  (5 columns)
+    input [2:0] dy,   // 0..6  (7 rows)
+    output reg pix
 );
 
-reg [1:0] mux = 0;
+reg [6:0] rows;
 
-always @(posedge clk) begin
-    mux <= mux + 1;
-
-    case (mux)
-        2'b00: begin
-            an  <= 4'b1110;
-            seg <= decode7(digit0);
-        end
-        2'b01: begin
-            an  <= 4'b0111;
-            seg <= decode7(digit3);
-        end
-        default: begin
-            an  <= 4'b1111;
-            seg <= 7'b1111111;
-        end
-    endcase
-end
-
-function [6:0] decode7(input [3:0] d);
-    case (d)
-        0: decode7 = 7'b1000000;
-        1: decode7 = 7'b1111001;
-        2: decode7 = 7'b0100100;
-        3: decode7 = 7'b0110000;
-        4: decode7 = 7'b0011001;
-        5: decode7 = 7'b0010010;
-        6: decode7 = 7'b0000010;
-        7: decode7 = 7'b1111000;
-        8: decode7 = 7'b0000000;
-        9: decode7 = 7'b0011000;
-        default: decode7 = 7'b1111111;
-    endcase
-endfunction
-
+    always @(*) begin
+        case (digit)
+            0: rows = 7'b1111110;
+            1: rows = 7'b0110000;
+            2: rows = 7'b1101101;
+            3: rows = 7'b1111001;
+            4: rows = 7'b0110011;
+            5: rows = 7'b1011011;
+            6: rows = 7'b1011111;
+            7: rows = 7'b1110000;
+            8: rows = 7'b1111111;
+            9: rows = 7'b1111011;
+            default: rows = 7'b0000000;
+        endcase
+        
+        pix = rows[6 - dy];
+    end
 endmodule
