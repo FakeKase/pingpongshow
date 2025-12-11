@@ -10,7 +10,7 @@
 //              player (left) control, AI (right) paddle, and color rendering.
 // 
 //////////////////////////////////////////////////////////////////////////////////
-//test
+
 module pong(
     input clk,          // 100 MHz system clock
     input btn_reset,    // active-high reset button
@@ -22,7 +22,9 @@ module pong(
     output VS,          // VGA vertical sync
     output [3:0] RED,   // VGA red channel
     output [3:0] GREEN, // VGA green channel
-    output [3:0] BLUE   // VGA blue channel
+    output [3:0] BLUE,   // VGA blue channel
+    output reg [3:0] ledL,
+    output reg [3:0] ledR
 );
 
 // -------------------------------------------------------------------------
@@ -41,6 +43,14 @@ vga v(
     .x(x),
     .y(y),
     .blank(blank)
+);
+
+sevenseg SSG(
+    .clk(clk),
+    .digit0(score_left[3:0]),
+    .digit3(score_right[3:0]),
+    .seg(seg),
+    .an(an)
 );
 
 // -------------------------------------------------------------------------
@@ -63,10 +73,13 @@ localparam BALL_SIZE  = 8;
 localparam BALL_SPX   = 5;      // ball speed per frame
 localparam BALL_SPY   = 3;
 localparam PAD_WIDTH  = 10;
-localparam PAD_HEIGHT = 48;
+localparam PADP_HEIGHT = 84;
+localparam PAD_HEIGHT = 36;
 localparam PAD_OFFS   = 32;     // distance from edge
 localparam PAD_SPY    = 3;      // paddle speed per frame
 localparam PAD_SPX    = 3;
+localparam PADP_SPX = 6;
+localparam PADP_SPY = 6;
 
 parameter NEW_GAME = 2'b00;
 parameter PLAY     = 2'b01;
@@ -80,7 +93,11 @@ reg [9:0] padl_x;               //player's x
 reg [9:0] padl_y, padr_y;       // paddle Y positions
 reg coll_l, coll_r;             // collision flags
 reg [1:0] state = NEW_GAME;
-
+// -------------------------------------------------------------------------
+// Score registers
+// -------------------------------------------------------------------------
+reg [7:0] score_left  = 0;
+reg [7:0] score_right = 0;
 // pixel combinational flags
 reg ball_pix, padl_pix, padr_pix;
 
@@ -94,7 +111,7 @@ always @(*) begin
     
     // left paddle rectangle
     padl_pix = (x >= padl_x) && (x < padl_x + PAD_WIDTH) &&
-               (y >= padl_y) && (y < padl_y + PAD_HEIGHT);
+               (y >= padl_y) && (y < padl_y + PADP_HEIGHT);
     
     // right paddle rectangle
     padr_pix = (x >= SCREEN_W - PAD_OFFS - PAD_WIDTH) && (x < SCREEN_W - PAD_OFFS) &&
@@ -122,7 +139,7 @@ always @(posedge clk) begin
         // reset positions
         state <= NEW_GAME;
         padl_x <= PAD_OFFS;
-        padl_y <= (SCREEN_H - PAD_HEIGHT)/2;
+        padl_y <= (SCREEN_H - PADP_HEIGHT)/2;
         padr_y <= (SCREEN_H - PAD_HEIGHT)/2;
         ball_x <= SCREEN_W/2 - BALL_SIZE/2;
         ball_y <= SCREEN_H/2 - BALL_SIZE/2;
@@ -130,6 +147,10 @@ always @(posedge clk) begin
         ball_dy <= 0; // start moving down
         coll_l <= 0;
         coll_r <= 0;
+        score_left  <= 0; //reset score
+        score_right <= 0;
+        //ledL <= 0;
+        //ledR <= 0;
     end
     else if (frame_tick) begin
         case (state)
@@ -174,7 +195,7 @@ always @(posedge clk) begin
                         (ball_x > padl_x + PAD_WIDTH) && // ball was outside paddle last frame
                         (ball_x - BALL_SPX <= padl_x + PAD_WIDTH) && // will cross paddle this frame
                         (ball_y + BALL_SIZE >= padl_y) && 
-                        (ball_y <= padl_y + PAD_HEIGHT)
+                        (ball_y <= padl_y + PADP_HEIGHT)
                     ) begin
                         ball_dx <= 1; // bounce right
                         ball_x <= padl_x + PAD_WIDTH + 1;
@@ -200,25 +221,25 @@ always @(posedge clk) begin
                 
                 // --- Player paddle control ---
                 if (btn_dn) begin
-                    if (padl_y + PAD_HEIGHT + PAD_SPY >= SCREEN_H)
-                        padl_y <= SCREEN_H - PAD_HEIGHT;
+                    if (padl_y + PAD_HEIGHT + PADP_SPY >= SCREEN_H)
+                        padl_y <= SCREEN_H - PADP_HEIGHT;
                     else
-                        padl_y <= padl_y + PAD_SPY;
+                        padl_y <= padl_y + PADP_SPY;
                 end else if (btn_up) begin
-                    if (padl_y < PAD_SPY)
+                    if (padl_y < PADP_SPY)
                         padl_y <= 0;
                     else
-                        padl_y <= padl_y - PAD_SPY;
+                        padl_y <= padl_y - PADP_SPY;
                 end else if(btn_left) begin
-                    if(padl_x < PAD_SPX)
+                    if(padl_x < PADP_SPX)
                         padl_x <= 0;
                     else
-                        padl_x <= padl_x - PAD_SPX;
+                        padl_x <= padl_x - PADP_SPX;
                 end else if(btn_right) begin
-                    if(padl_x + PAD_WIDTH + PAD_SPX >= SCREEN_W)
+                    if(padl_x + PAD_WIDTH + PADP_SPX >= SCREEN_W)
                         padl_x <= SCREEN_W - PAD_WIDTH;
                     else
-                        padl_x <= padl_x + PAD_SPX;
+                        padl_x <= padl_x + PADP_SPX;
                 end
                 
                 // --- AI paddle control (simple follow) ---
@@ -235,6 +256,16 @@ always @(posedge clk) begin
                 end
                 
                 // --- Check for scoring ---
+                // --- Score update ---
+                if (coll_l) begin
+                    score_right <= score_right + 1;
+                    ledR <= ledR + 1;
+                end
+                if (coll_r) begin
+                    score_left <= score_left + 1;
+                    ledL <= ledL + 1;
+                end
+                
                 if (coll_l || coll_r)
                     state <= NEW_GAME; // reset round
             end

@@ -47,3 +47,38 @@ set_property IOSTANDARD LVCMOS33 [get_ports btn_left]
 set_property PACKAGE_PIN W19 [get_ports btn_left]
 set_property PACKAGE_PIN T17 [get_ports btn_right]
 set_property IOSTANDARD LVCMOS33 [get_ports btn_right]
+
+## Seven Segment Display
+set_property PACKAGE_PIN W7  [get_ports {seg[0]}] ;# CA
+set_property PACKAGE_PIN W6  [get_ports {seg[1]}] ;# CB
+set_property PACKAGE_PIN U8  [get_ports {seg[2]}] ;# CC
+set_property PACKAGE_PIN V8  [get_ports {seg[3]}] ;# CD
+set_property PACKAGE_PIN U5  [get_ports {seg[4]}] ;# CE
+set_property PACKAGE_PIN V5  [get_ports {seg[5]}] ;# CF
+set_property PACKAGE_PIN U7  [get_ports {seg[6]}] ;# CG
+
+set_property PACKAGE_PIN V7  [get_ports {dp}]     ;# DP
+
+## Digit Enable (Anodes)
+set_property PACKAGE_PIN U2  [get_ports {an[0]}]  ;# AN0
+set_property PACKAGE_PIN U4  [get_ports {an[1]}]  ;# AN1
+set_property PACKAGE_PIN V4  [get_ports {an[2]}]  ;# AN2
+set_property PACKAGE_PIN W4  [get_ports {an[3]}]  ;# AN3
+
+
+set_property IOSTANDARD LVCMOS33 [get_ports {ledL[3]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledL[2]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledL[1]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledL[0]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledR[3]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledR[2]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledR[1]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledR[0]}]
+set_property PACKAGE_PIN L1 [get_ports {ledL[3]}]
+set_property PACKAGE_PIN P1 [get_ports {ledL[2]}]
+set_property PACKAGE_PIN N3 [get_ports {ledL[1]}]
+set_property PACKAGE_PIN P3 [get_ports {ledL[0]}]
+set_property PACKAGE_PIN V19 [get_ports {ledR[3]}]
+set_property PACKAGE_PIN U19 [get_ports {ledR[2]}]
+set_property PACKAGE_PIN E19 [get_ports {ledR[1]}]
+set_property PACKAGE_PIN U16 [get_ports {ledR[0]}]
