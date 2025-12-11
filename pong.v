@@ -10,7 +10,7 @@
 //              player (left) control, AI (right) paddle, and color rendering.
 // 
 //////////////////////////////////////////////////////////////////////////////////
-
+//test
 module pong(
     input clk,          // 100 MHz system clock
     input btn_reset,    // active-high reset button
