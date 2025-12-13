@@ -60,17 +60,21 @@ localparam BALL_SIZE  = 8;
 localparam BALL_SPX   = 5;      // ball speed per frame
 localparam BALL_SPY   = 3;
 localparam PAD_WIDTH  = 10;
-localparam PADP_HEIGHT = 84;
-localparam PAD_HEIGHT = 36;
+localparam PADP_HEIGHT = 48;
+localparam PAD_HEIGHT = 48;
 localparam PAD_OFFS   = 32;     // distance from edge
-localparam PAD_SPY    = 3;      // paddle speed per frame
-localparam PAD_SPX    = 3;
-localparam PADP_SPX = 6;
-localparam PADP_SPY = 6;
+localparam PAD_SPY    = 5;      // paddle speed per frame
+localparam PAD_SPX    = 5;
+localparam PADP_SPX = 5;
+localparam PADP_SPY = 5;
 
 localparam SCORE_SCALE = 6;  // enlarge digit: 5x7 ? (5*6)x(7*6) = 30x42 pixels
 localparam DIGIT_W = 5 * SCORE_SCALE;
 localparam DIGIT_H = 7 * SCORE_SCALE;
+//add score 2 digits
+localparam DIGIT_SPACING = SCORE_SCALE * 2;
+localparam DOUBLE_SCORE_WIDTH = DIGIT_W * 2 + DIGIT_SPACING;
+
 
 // ==========================================================
 // SCORE DISPLAY POSITIONS (NEW CODE)
@@ -79,7 +83,9 @@ localparam SCORE_WIDTH  = DIGIT_W;   // use DIGIT_W so SCORE_SCALE is respected
 localparam SCORE_HEIGHT = DIGIT_H;   // use DIGIT_H so SCORE_SCALE is respected
 
 localparam P1_SCORE_X = 250;
-localparam P2_SCORE_X = 370;
+localparam P1_SCORE_X_tens = 150;
+localparam P2_SCORE_X_tens = 300;
+localparam P2_SCORE_X = 400;
 localparam SCORE_Y    = 30;
 
 
@@ -136,6 +142,18 @@ reg [5:0] bit_idx;   // 0..34
 // compute bitmaps as wires (avoid double function calls in expressions)
 wire [34:0] left_bitmap  = digit_bitmap(score_left[3:0]);
 wire [34:0] right_bitmap = digit_bitmap(score_right[3:0]);
+//score 2 digits
+wire [3:0] score_left_tens  = score_left / 10;
+wire [3:0] score_left_ones  = score_left % 10;
+wire [3:0] score_right_tens = score_right / 10;
+wire [3:0] score_right_ones = score_right % 10;
+
+wire [34:0] left_tens_bitmap  = digit_bitmap(score_left_tens);
+wire [34:0] left_ones_bitmap  = digit_bitmap(score_left_ones);
+wire [34:0] right_tens_bitmap = digit_bitmap(score_right_tens);
+wire [34:0] right_ones_bitmap = digit_bitmap(score_right_ones);
+
+
 
 // -------------------------------------------------------------------------
 // 5. Rendering logic (fixed)
@@ -145,24 +163,45 @@ always @(*) begin
     color = 12'h000;
 
     // -----------------------------
-    // Draw left player's score (use SCORE_SCALE)
-    // -----------------------------
-    if ((x >= P1_SCORE_X) && (x < P1_SCORE_X + SCORE_WIDTH) &&
-        (y >= SCORE_Y)     && (y < SCORE_Y + SCORE_HEIGHT)) begin
+// Draw LEFT player's score (0-11)
+// -----------------------------
+if ((x >= P1_SCORE_X) && 
+    (x < P1_SCORE_X + (score_left >= 10 ? DOUBLE_SCORE_WIDTH : DIGIT_W)) &&
+    (y >= SCORE_Y) && (y < SCORE_Y + SCORE_HEIGHT)) begin
 
-        // compute which source pixel in 5x7 bitmap this maps to
-        row_idx = (y - SCORE_Y) / SCORE_SCALE;    // 0..6
-        col_idx = (x - P1_SCORE_X) / SCORE_SCALE; // 0..4
-        bit_idx = row_idx * 5 + col_idx;          // 0..34
+    row_idx = (y - SCORE_Y) / SCORE_SCALE;
 
-        // index from MSB down: [34 - bit_idx]
-        if (left_bitmap[34 - bit_idx])
-            color = 12'hFFF; // white
+    // tens digit
+    if (score_left >= 10 && x < P1_SCORE_X + DIGIT_W) begin
+        col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
+        bit_idx = row_idx * 5 + col_idx;
+
+        if (left_tens_bitmap[34 - bit_idx])
+            color = 12'hFFF;
     end
+    // ones digit
+    else begin
+        col_idx = (x - (P1_SCORE_X + (score_left >= 10 ? (DIGIT_W + DIGIT_SPACING) : 0))) 
+                  / SCORE_SCALE;
+        bit_idx = row_idx * 5 + col_idx;
 
-    // -----------------------------
-    // Draw right player's score
-    // -----------------------------
+        if (left_ones_bitmap[34 - bit_idx])
+            color = 12'hFFF;
+    end
+end
+    // ones digit
+//    else begin
+//        col_idx = (x - (P1_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
+//        bit_idx = row_idx * 5 + col_idx;
+
+//        if (left_ones_bitmap[34 - bit_idx])
+//            color = 12'hFFF;
+//    end
+
+
+     //-----------------------------
+     //Draw right player's score
+     //-----------------------------
     else if ((x >= P2_SCORE_X) && (x < P2_SCORE_X + SCORE_WIDTH) &&
              (y >= SCORE_Y)     && (y < SCORE_Y + SCORE_HEIGHT)) begin
 
@@ -173,6 +212,34 @@ always @(*) begin
         if (right_bitmap[34 - bit_idx])
             color = 12'hFFF; // white
     end
+
+else if ((x >= P2_SCORE_X) && 
+         (x < P2_SCORE_X + (score_right >= 10 ? DOUBLE_SCORE_WIDTH : DIGIT_W)) &&
+         (y >= SCORE_Y) && (y < SCORE_Y + SCORE_HEIGHT)) begin
+
+
+    row_idx = (y - SCORE_Y) / SCORE_SCALE;
+
+    // tens digit
+    if (score_right >= 10 &&
+        x < P2_SCORE_X + DIGIT_W) begin
+
+        col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
+        bit_idx = row_idx * 5 + col_idx;
+
+        if (right_tens_bitmap[34 - bit_idx])
+            color = 12'hFFF;
+
+    end
+    // ones digit
+//    else begin
+//        col_idx = (x - (P2_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
+//        bit_idx = row_idx * 5 + col_idx;
+
+//        if (right_ones_bitmap[34 - bit_idx])
+//            color = 12'hFFF;
+//    end
+end
 
     // -----------------------------
     // Ball and paddles (original priority)
@@ -313,28 +380,42 @@ always @(posedge clk) begin
                 end
                 
                 // --- AI paddle control (simple follow) ---
-                if (padr_y + PAD_HEIGHT/2 < ball_y) begin
-                    if (padr_y + PAD_HEIGHT + PAD_SPY >= SCREEN_H)
-                        padr_y <= SCREEN_H - PAD_HEIGHT;
-                    else
+                if(ball_dx > 0) begin
+                    if (padr_y + PAD_HEIGHT/2 < ball_y) begin
+                     if (padr_y + PAD_HEIGHT + PAD_SPY >= SCREEN_H)
+                          padr_y <= SCREEN_H - PAD_HEIGHT;
+                     else
                         padr_y <= padr_y + PAD_SPY;
-                end else if (padr_y + PAD_HEIGHT/2 > ball_y + BALL_SIZE) begin
-                    if (padr_y < PAD_SPY)
-                        padr_y <= 0;
-                    else
-                        padr_y <= padr_y - PAD_SPY;
+                    end else if (padr_y + PAD_HEIGHT/2 > ball_y + BALL_SIZE) begin
+                        if (padr_y < PAD_SPY)
+                            padr_y <= 0;
+                        else
+                            padr_y <= padr_y - PAD_SPY;
+                    end
                 end
                 
                 // --- Check for scoring ---
                 // --- Score update ---
-                if (coll_l) begin
+//                if (coll_l) begin
+//                    score_right <= score_right + 1;
+//                    ledR <= ledR + 1;
+//                end
+//                if (coll_r) begin
+//                    score_left <= score_left + 1;
+//                    ledL <= ledL + 1;
+//                end
+                
+                //score 2 digits
+                if (coll_l && score_right < 5)
                     score_right <= score_right + 1;
-                    ledR <= ledR + 1;
-                end
-                if (coll_r) begin
+                else if(coll_l && score_left == 5)
+                    state <= NEW_GAME;
+                
+                if (coll_r && score_left < 5)
                     score_left <= score_left + 1;
-                    ledL <= ledL + 1;
-                end
+                else if(coll_r && score_left == 5)
+                    state <= NEW_GAME;
+
                 
                 if (coll_l || coll_r)
                     state <= NEW_GAME; // reset round
