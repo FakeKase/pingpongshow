@@ -7,8 +7,9 @@
 // - Score: if either side reaches 11 -> GAME_OVER -> after delay reset both to 0
 //
 // Power-ups (spawn randomly, NOT overlapping score area / center line / borders):
-// 1) LONG  (red)  : paddle becomes 2x height for 15 seconds
-// 2) SPEED (cyan) : when that side hits the ball, ball speed becomes 1.5x for 10 seconds
+// 1) LONG  (red)    : paddle becomes 2x height for 15 seconds
+// 2) SPEED (cyan)   : when that side hits the ball, ball speed becomes 1.5x for 10 seconds
+// 3) SLOW  (yellow) : when that side picks up, opponent paddle move speed becomes 0.75x for 10 seconds
 //
 // NOTE: On NEW_GAME and OUT LEFT/OUT RIGHT -> reset ball speed to base (BALL_SPX/BALL_SPY)
 //////////////////////////////////////////////////////////////////////////////////
@@ -112,7 +113,7 @@ module pong(
 
     localparam PAD_OFFS = 32;
 
-    localparam PADL_SPX = 5;
+    localparam PADL_SPX = 5; // base paddle move speed
     localparam PADL_SPY = 5;
     localparam PADR_SPX = 5;
     localparam PADR_SPY = 5;
@@ -144,10 +145,12 @@ module pong(
 
     localparam integer POWER_FRAMES  = 60*15; // LONG: 15s
     localparam integer SPEED_FRAMES  = 60*10; // SPEED: 10s
+    localparam integer SLOW_FRAMES   = 60*10; // SLOW:  10s
     localparam integer RESPAWN_DELAY = 60*2;  // 2s
 
-    localparam ITEM_LONG  = 1'b0; // red
-    localparam ITEM_SPEED = 1'b1; // cyan
+    localparam [1:0] ITEM_LONG  = 2'd0; // red
+    localparam [1:0] ITEM_SPEED = 2'd1; // cyan
+    localparam [1:0] ITEM_SLOW  = 2'd2; // yellow
 
     // -------------------------------------------------------------------------
     // 4) State registers
@@ -168,25 +171,38 @@ module pong(
     // ITEM regs
     reg        item_active;
     reg        spawn_pending;
-    reg        item_type;           // 0=LONG, 1=SPEED
+    reg [1:0]  item_type;           // 0=LONG, 1=SPEED, 2=SLOW
     reg [9:0]  item_x, item_y;
     reg [15:0] lfsr;
 
     reg [15:0] p1_long_cnt,  p2_long_cnt;
     reg [15:0] p1_speed_cnt, p2_speed_cnt;
+    reg [15:0] p1_slow_cnt,  p2_slow_cnt;  // NOTE: "slow debuff placed on opponent"
+                                             // if p1_slow_cnt!=0 => player1 is slowed
+                                             // if p2_slow_cnt!=0 => player2 is slowed
 
     reg [15:0] spawn_delay_cnt;
 
     // effect flags + real paddle heights
-    wire p1_long, p2_long, p1_speed, p2_speed;
-    assign p1_long  = (p1_long_cnt  != 0);
-    assign p2_long  = (p2_long_cnt  != 0);
-    assign p1_speed = (p1_speed_cnt != 0);
-    assign p2_speed = (p2_speed_cnt != 0);
+    wire p1_long, p2_long, p1_speed, p2_speed, p1_slowed, p2_slowed;
+    assign p1_long   = (p1_long_cnt  != 0);
+    assign p2_long   = (p2_long_cnt  != 0);
+    assign p1_speed  = (p1_speed_cnt != 0);
+    assign p2_speed  = (p2_speed_cnt != 0);
+    assign p1_slowed = (p1_slow_cnt  != 0);
+    assign p2_slowed = (p2_slow_cnt  != 0);
 
     wire [9:0] padl_h, padr_h;
     assign padl_h = p1_long ? (PADL_HEIGHT*2) : PADL_HEIGHT;
     assign padr_h = p2_long ? (PADR_HEIGHT*2) : PADR_HEIGHT;
+
+    // effective paddle move speed (0.75x when slowed)
+    wire [3:0] p1_spx_eff, p1_spy_eff, p2_spx_eff, p2_spy_eff;
+    assign p1_spx_eff = p1_slowed ? ((PADL_SPX * 3) / 4) : PADL_SPX;
+    assign p1_spy_eff = p1_slowed ? ((PADL_SPY * 3) / 4) : PADL_SPY;
+
+    assign p2_spx_eff = p2_slowed ? ((PADR_SPX * 3) / 4) : PADR_SPX;
+    assign p2_spy_eff = p2_slowed ? ((PADR_SPY * 3) / 4) : PADR_SPY;
 
     // candidate spawn from LFSR
     wire [9:0] cand_x, cand_y;
@@ -285,16 +301,13 @@ module pong(
             row_idx = (y - SCORE_Y) / SCORE_SCALE;
 
             if (score_left >= 10) begin
-                // tens
                 if (x < P1_SCORE_X + DIGIT_W) begin
                     col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
                     if (row_idx < 7 && col_idx < 5) begin
                         bit_idx = row_idx * 5 + col_idx;
                         if (sl_tens_bm[34 - bit_idx]) color = 12'hFFF;
                     end
-                end
-                // ones
-                else if (x >= P1_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
+                end else if (x >= P1_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
                     col_idx = (x - (P1_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
                     if (row_idx < 7 && col_idx < 5) begin
                         bit_idx = row_idx * 5 + col_idx;
@@ -302,7 +315,6 @@ module pong(
                     end
                 end
             end else begin
-                // single digit
                 col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
                 if (row_idx < 7 && col_idx < 5) begin
                     bit_idx = row_idx * 5 + col_idx;
@@ -320,16 +332,13 @@ module pong(
             row_idx = (y - SCORE_Y) / SCORE_SCALE;
 
             if (score_right >= 10) begin
-                // tens
                 if (x < P2_SCORE_X + DIGIT_W) begin
                     col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
                     if (row_idx < 7 && col_idx < 5) begin
                         bit_idx = row_idx * 5 + col_idx;
                         if (sr_tens_bm[34 - bit_idx]) color = 12'hFFF;
                     end
-                end
-                // ones
-                else if (x >= P2_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
+                end else if (x >= P2_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
                     col_idx = (x - (P2_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
                     if (row_idx < 7 && col_idx < 5) begin
                         bit_idx = row_idx * 5 + col_idx;
@@ -337,7 +346,6 @@ module pong(
                     end
                 end
             end else begin
-                // single digit
                 col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
                 if (row_idx < 7 && col_idx < 5) begin
                     bit_idx = row_idx * 5 + col_idx;
@@ -366,9 +374,13 @@ module pong(
             padr_pix = (x >= padr_x) && (x < padr_x + PAD_WIDTH) &&
                        (y >= padr_y) && (y < padr_y + padr_h);
 
-            if (item_pix)
-                color = (item_type == ITEM_SPEED) ? 12'h0FF : 12'hF00; // SPEED=cyan, LONG=red
-            else if (ball_pix)
+            if (item_pix) begin
+                case (item_type)
+                    ITEM_LONG : color = 12'hF00; // red
+                    ITEM_SPEED: color = 12'h0FF; // cyan
+                    default  : color = 12'hFF0; // yellow (SLOW)
+                endcase
+            end else if (ball_pix)
                 color = 12'h0F0;
             else if (padl_pix || padr_pix)
                 color = 12'hFFF;
@@ -410,7 +422,6 @@ module pong(
 
             win_cnt <= 0;
 
-            // items/effects
             item_active     <= 1'b0;
             spawn_pending   <= 1'b0;
             item_type       <= ITEM_LONG;
@@ -422,12 +433,13 @@ module pong(
             p2_long_cnt     <= 0;
             p1_speed_cnt    <= 0;
             p2_speed_cnt    <= 0;
+            p1_slow_cnt     <= 0;
+            p2_slow_cnt     <= 0;
 
             spawn_delay_cnt <= 0;
 
         end else if (frame_tick) begin
 
-            // debug LEDs
             ledL <= score_left[3:0];
             ledR <= score_right[3:0];
 
@@ -439,6 +451,8 @@ module pong(
             if (p2_long_cnt  != 0) p2_long_cnt  <= p2_long_cnt  - 1;
             if (p1_speed_cnt != 0) p1_speed_cnt <= p1_speed_cnt - 1;
             if (p2_speed_cnt != 0) p2_speed_cnt <= p2_speed_cnt - 1;
+            if (p1_slow_cnt  != 0) p1_slow_cnt  <= p1_slow_cnt  - 1;
+            if (p2_slow_cnt  != 0) p2_slow_cnt  <= p2_slow_cnt  - 1;
 
             // spawn delay + request spawn
             if (!item_active) begin
@@ -453,7 +467,16 @@ module pong(
                 if (!is_bad_spawn(cand_x, cand_y)) begin
                     item_x <= cand_x;
                     item_y <= cand_y;
-                    item_type <= (lfsr[0] ? ITEM_SPEED : ITEM_LONG); // 50/50
+
+                    // random type among 3 items
+                    // 00/01/10 => LONG/SPEED/SLOW (11 maps to LONG)
+                    case (lfsr[1:0])
+                        2'b00: item_type <= ITEM_LONG;
+                        2'b01: item_type <= ITEM_SPEED;
+                        2'b10: item_type <= ITEM_SLOW;
+                        default: item_type <= ITEM_LONG;
+                    endcase
+
                     item_active <= 1'b1;
                     spawn_pending <= 1'b0;
                 end
@@ -462,7 +485,6 @@ module pong(
             case (state)
 
                 NEW_GAME: begin
-                    // reset positions
                     ball_x <= SCREEN_W/2 - BALL_SIZE/2;
                     ball_y <= SCREEN_H/2 - BALL_SIZE/2;
 
@@ -475,7 +497,7 @@ module pong(
                     ball_dx  <= 1'b1;
                     ball_dy  <= 1'b0;
 
-                    // ? reset speed to base on new round
+                    // reset speed base
                     ball_spx <= BALL_SPX;
                     ball_spy <= BALL_SPY;
 
@@ -483,9 +505,8 @@ module pong(
                 end
 
                 PLAY: begin
-                    // 1) OUT LEFT? -> right scores
+                    // OUT LEFT?
                     if ((!ball_dx) && (ball_x < ball_spx)) begin
-
                         if (score_right == MAX_SCORE-1) begin
                             score_right <= score_right + 1;
                             win_cnt     <= WIN_DELAY_FRAMES;
@@ -495,13 +516,12 @@ module pong(
                             state       <= NEW_GAME;
                         end
 
-                        // reset round positions
                         ball_x  <= SCREEN_W/2 - BALL_SIZE/2;
                         ball_y  <= SCREEN_H/2 - BALL_SIZE/2;
                         ball_dx <= 1'b1;
                         ball_dy <= 1'b0;
 
-                        // ? reset speed to base on OUT
+                        // reset speed base
                         ball_spx <= BALL_SPX;
                         ball_spy <= BALL_SPY;
 
@@ -511,9 +531,8 @@ module pong(
                         padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
                     end
 
-                    // 2) OUT RIGHT? -> left scores
+                    // OUT RIGHT?
                     else if ((ball_dx) && (ball_x + BALL_SIZE + ball_spx >= SCREEN_W)) begin
-
                         if (score_left == MAX_SCORE-1) begin
                             score_left <= score_left + 1;
                             win_cnt    <= WIN_DELAY_FRAMES;
@@ -523,13 +542,12 @@ module pong(
                             state      <= NEW_GAME;
                         end
 
-                        // reset round positions
                         ball_x  <= SCREEN_W/2 - BALL_SIZE/2;
                         ball_y  <= SCREEN_H/2 - BALL_SIZE/2;
                         ball_dx <= 1'b1;
                         ball_dy <= 1'b0;
 
-                        // ? reset speed to base on OUT
+                        // reset speed base
                         ball_spx <= BALL_SPX;
                         ball_spy <= BALL_SPY;
 
@@ -539,9 +557,9 @@ module pong(
                         padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
                     end
 
-                    // 3) normal play
+                    // normal play
                     else begin
-                        // ----------------- ITEM PICKUP -----------------
+                        // ITEM PICKUP
                         if (item_active) begin
                             // paddle1 pickup
                             if ((padl_x < item_x + ITEM_SIZE) && (padl_x + PAD_WIDTH > item_x) &&
@@ -551,8 +569,12 @@ module pong(
 
                                 if (item_type == ITEM_LONG)
                                     p1_long_cnt  <= POWER_FRAMES;
-                                else
+                                else if (item_type == ITEM_SPEED)
                                     p1_speed_cnt <= SPEED_FRAMES;
+                                else begin
+                                    // SLOW: slow opponent (player2)
+                                    p2_slow_cnt  <= SLOW_FRAMES;
+                                end
 
                                 spawn_pending   <= 1'b0;
                                 spawn_delay_cnt <= RESPAWN_DELAY;
@@ -565,16 +587,20 @@ module pong(
 
                                 if (item_type == ITEM_LONG)
                                     p2_long_cnt  <= POWER_FRAMES;
-                                else
+                                else if (item_type == ITEM_SPEED)
                                     p2_speed_cnt <= SPEED_FRAMES;
+                                else begin
+                                    // SLOW: slow opponent (player1)
+                                    p1_slow_cnt  <= SLOW_FRAMES;
+                                end
 
                                 spawn_pending   <= 1'b0;
                                 spawn_delay_cnt <= RESPAWN_DELAY;
                             end
                         end
 
-                        // --------- Ball X + paddle collision ---------
-                        if (ball_dx) begin // moving right
+                        // Ball X + collision
+                        if (ball_dx) begin // right
                             if ((ball_x + BALL_SIZE + ball_spx >= padr_x) &&
                                 (ball_y + BALL_SIZE >= padr_y) &&
                                 (ball_y <= padr_y + padr_h)) begin
@@ -582,10 +608,10 @@ module pong(
                                 ball_dx <= 1'b0;
                                 ball_x  <= padr_x - BALL_SIZE - 1;
 
-                                // ? speed boost only if right side has SPEED buff
+                                // speed boost if right side has SPEED
                                 if (p2_speed) begin
-                                    ball_spx <= (BALL_SPX * 4) / 2;
-                                    ball_spy <= (BALL_SPY * 4) / 2;
+                                    ball_spx <= (BALL_SPX * 3) / 2;
+                                    ball_spy <= (BALL_SPY * 3) / 2;
                                 end else begin
                                     ball_spx <= BALL_SPX;
                                     ball_spy <= BALL_SPY;
@@ -594,7 +620,7 @@ module pong(
                             end else begin
                                 ball_x <= ball_x + ball_spx;
                             end
-                        end else begin // moving left
+                        end else begin // left
                             if ((ball_x > padl_x + PAD_WIDTH) &&
                                 (ball_x - ball_spx <= padl_x + PAD_WIDTH) &&
                                 (ball_y + BALL_SIZE >= padl_y) &&
@@ -603,10 +629,10 @@ module pong(
                                 ball_dx <= 1'b1;
                                 ball_x  <= padl_x + PAD_WIDTH + 1;
 
-                                // ? speed boost only if left side has SPEED buff
+                                // speed boost if left side has SPEED
                                 if (p1_speed) begin
-                                    ball_spx <= (BALL_SPX * 4) / 2;
-                                    ball_spy <= (BALL_SPY * 4) / 2;
+                                    ball_spx <= (BALL_SPX * 3) / 2;
+                                    ball_spy <= (BALL_SPY * 3) / 2;
                                 end else begin
                                     ball_spx <= BALL_SPX;
                                     ball_spy <= BALL_SPY;
@@ -617,7 +643,7 @@ module pong(
                             end
                         end
 
-                        // --------- Ball Y ---------
+                        // Ball Y
                         if (!ball_dy) begin // down
                             if (ball_y + BALL_SIZE + ball_spy >= SCREEN_H) begin
                                 ball_y  <= SCREEN_H - BALL_SIZE;
@@ -634,54 +660,54 @@ module pong(
                             end
                         end
 
-                        // --------- Player 1 movement (use real height) ---------
+                        // Player 1 movement (use effective speed + real height)
                         if (p1_dn) begin
-                            if (padl_y + padl_h + PADL_SPY >= SCREEN_H)
+                            if (padl_y + padl_h + p1_spy_eff >= SCREEN_H)
                                 padl_y <= SCREEN_H - padl_h;
                             else
-                                padl_y <= padl_y + PADL_SPY;
+                                padl_y <= padl_y + p1_spy_eff;
                         end else if (p1_up) begin
-                            if (padl_y < PADL_SPY)
+                            if (padl_y < p1_spy_eff)
                                 padl_y <= 0;
                             else
-                                padl_y <= padl_y - PADL_SPY;
+                                padl_y <= padl_y - p1_spy_eff;
                         end
 
                         if (p1_left) begin
-                            if (padl_x <= P1_X_MIN + PADL_SPX)
+                            if (padl_x <= P1_X_MIN + p1_spx_eff)
                                 padl_x <= P1_X_MIN;
                             else
-                                padl_x <= padl_x - PADL_SPX;
+                                padl_x <= padl_x - p1_spx_eff;
                         end else if (p1_right) begin
-                            if (padl_x + PADL_SPX >= P1_X_MAX)
+                            if (padl_x + p1_spx_eff >= P1_X_MAX)
                                 padl_x <= P1_X_MAX;
                             else
-                                padl_x <= padl_x + PADL_SPX;
+                                padl_x <= padl_x + p1_spx_eff;
                         end
 
-                        // --------- Player 2 movement (use real height) ---------
+                        // Player 2 movement (use effective speed + real height)
                         if (p2_dn) begin
-                            if (padr_y + padr_h + PADR_SPY >= SCREEN_H)
+                            if (padr_y + padr_h + p2_spy_eff >= SCREEN_H)
                                 padr_y <= SCREEN_H - padr_h;
                             else
-                                padr_y <= padr_y + PADR_SPY;
+                                padr_y <= padr_y + p2_spy_eff;
                         end else if (p2_up) begin
-                            if (padr_y < PADR_SPY)
+                            if (padr_y < p2_spy_eff)
                                 padr_y <= 0;
                             else
-                                padr_y <= padr_y - PADR_SPY;
+                                padr_y <= padr_y - p2_spy_eff;
                         end
 
                         if (p2_left) begin
-                            if (padr_x <= P2_X_MIN + PADR_SPX)
+                            if (padr_x <= P2_X_MIN + p2_spx_eff)
                                 padr_x <= P2_X_MIN;
                             else
-                                padr_x <= padr_x - PADR_SPX;
+                                padr_x <= padr_x - p2_spx_eff;
                         end else if (p2_right) begin
-                            if (padr_x + PADR_SPX >= P2_X_MAX)
+                            if (padr_x + p2_spx_eff >= P2_X_MAX)
                                 padr_x <= P2_X_MAX;
                             else
-                                padr_x <= padr_x + PADR_SPX;
+                                padr_x <= padr_x + p2_spx_eff;
                         end
                     end
                 end
