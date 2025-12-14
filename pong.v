@@ -11,6 +11,10 @@
 // 2) SPEED (cyan)   : when that side hits the ball, ball speed becomes 1.5x for 10 seconds
 // 3) SLOW  (yellow) : when that side picks up, opponent paddle move speed becomes 0.75x for 10 seconds
 //
+// GAME_OVER screen:
+// - Winner half  : GREEN background + "WIN"  (white)
+// - Loser half   : RED   background + "LOSE" (white)
+//
 // NOTE: On NEW_GAME and OUT LEFT/OUT RIGHT -> reset ball speed to base (BALL_SPX/BALL_SPY)
 //////////////////////////////////////////////////////////////////////////////////
 
@@ -127,6 +131,9 @@ module pong(
     localparam integer WIN_DELAY_FRAMES = 60;
     reg [15:0] win_cnt;
 
+    // winner latch for GAME_OVER screen
+    reg winner_left; // 1 => left wins, 0 => right wins
+
     // Score rendering
     localparam SCORE_SCALE   = 6;
     localparam DIGIT_W       = 5 * SCORE_SCALE;
@@ -151,6 +158,23 @@ module pong(
     localparam [1:0] ITEM_LONG  = 2'd0; // red
     localparam [1:0] ITEM_SPEED = 2'd1; // cyan
     localparam [1:0] ITEM_SLOW  = 2'd2; // yellow
+
+    // ----------------- GAME OVER TEXT (5x7 font scaled) -----------------
+    localparam MSG_SCALE   = 10;
+    localparam MSG_CHAR_W  = 5 * MSG_SCALE;
+    localparam MSG_CHAR_H  = 7 * MSG_SCALE;
+    localparam MSG_SPACING = 2 * MSG_SCALE;
+
+    localparam integer MSG_Y0 = (SCREEN_H/2) - (MSG_CHAR_H/2); // centered vertically
+
+    localparam integer WIN_W  = (3*MSG_CHAR_W) + (2*MSG_SPACING);
+    localparam integer LOSE_W = (4*MSG_CHAR_W) + (3*MSG_SPACING);
+
+    localparam integer LEFT_WIN_X0  = (MID_X/2) - (WIN_W/2);
+    localparam integer LEFT_LOSE_X0 = (MID_X/2) - (LOSE_W/2);
+
+    localparam integer RIGHT_WIN_X0  = MID_X + (MID_X/2) - (WIN_W/2);
+    localparam integer RIGHT_LOSE_X0 = MID_X + (MID_X/2) - (LOSE_W/2);
 
     // -------------------------------------------------------------------------
     // 4) State registers
@@ -177,9 +201,7 @@ module pong(
 
     reg [15:0] p1_long_cnt,  p2_long_cnt;
     reg [15:0] p1_speed_cnt, p2_speed_cnt;
-    reg [15:0] p1_slow_cnt,  p2_slow_cnt;  // NOTE: "slow debuff placed on opponent"
-                                             // if p1_slow_cnt!=0 => player1 is slowed
-                                             // if p2_slow_cnt!=0 => player2 is slowed
+    reg [15:0] p1_slow_cnt,  p2_slow_cnt;  // if p1_slow_cnt!=0 => player1 is slowed
 
     reg [15:0] spawn_delay_cnt;
 
@@ -231,6 +253,15 @@ module pong(
         end
     endfunction
 
+    // GAME_OVER letter bitmaps (5x7) as constants (avoid function-call indexing)
+    localparam [34:0] BM_W = 35'b10001_10001_10001_10101_10101_11011_10001;
+    localparam [34:0] BM_I = 35'b11111_00100_00100_00100_00100_00100_11111;
+    localparam [34:0] BM_N = 35'b10001_11001_10101_10011_10001_10001_10001;
+    localparam [34:0] BM_L = 35'b10000_10000_10000_10000_10000_10000_11111;
+    localparam [34:0] BM_O = 35'b01110_10001_10001_10001_10001_10001_01110;
+    localparam [34:0] BM_S = 35'b01111_10000_10000_01110_00001_00001_11110;
+    localparam [34:0] BM_E = 35'b11111_10000_10000_11110_10000_10000_11111;
+
     // forbid spawn in: borders, score areas, center line
     function automatic is_bad_spawn;
         input [9:0] sx;
@@ -277,6 +308,10 @@ module pong(
     // pixel flags
     reg ball_pix, padl_pix, padr_pix, item_pix;
 
+    // GAME_OVER helper regs (declared here to avoid "declarations not allowed")
+    integer msg_x0;
+    integer word_is_win; // 1 => WIN else LOSE
+
     // -------------------------------------------------------------------------
     // 6) Rendering (combinational)
     // -------------------------------------------------------------------------
@@ -292,100 +327,197 @@ module pong(
         padr_pix = 0;
         item_pix = 0;
 
-        // ---------------- LEFT SCORE ----------------
-        if ((x >= P1_SCORE_X) &&
-            (x <  P1_SCORE_X + ((score_left >= 10) ? DOUBLE_W : DIGIT_W)) &&
-            (y >= SCORE_Y) &&
-            (y <  SCORE_Y + DIGIT_H)) begin
+        msg_x0 = 0;
+        word_is_win = 0;
 
-            row_idx = (y - SCORE_Y) / SCORE_SCALE;
+        // ===================== GAME OVER SCREEN =====================
+        if (state == GAME_OVER) begin
+            // background split by winner
+            if (x < MID_X) begin
+                color = (winner_left) ? 12'h0F0 : 12'hF00; // green/red
+            end else begin
+                color = (winner_left) ? 12'hF00 : 12'h0F0; // red/green
+            end
 
-            if (score_left >= 10) begin
-                if (x < P1_SCORE_X + DIGIT_W) begin
-                    col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
-                    if (row_idx < 7 && col_idx < 5) begin
-                        bit_idx = row_idx * 5 + col_idx;
-                        if (sl_tens_bm[34 - bit_idx]) color = 12'hFFF;
+            // decide which word on this half + where to start
+            if (x < MID_X) begin
+                word_is_win = (winner_left) ? 1 : 0;
+                msg_x0      = (winner_left) ? LEFT_WIN_X0 : LEFT_LOSE_X0;
+            end else begin
+                word_is_win = (winner_left) ? 0 : 1;
+                msg_x0      = (word_is_win) ? RIGHT_WIN_X0 : RIGHT_LOSE_X0;
+            end
+
+            // draw text (white) within y-range
+            if ((y >= MSG_Y0) && (y < MSG_Y0 + MSG_CHAR_H)) begin
+                row_idx = (y - MSG_Y0) / MSG_SCALE;
+
+                if (word_is_win) begin
+                    // "WIN"
+                    // W
+                    if ((x >= msg_x0) && (x < msg_x0 + MSG_CHAR_W)) begin
+                        col_idx = (x - msg_x0) / MSG_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (BM_W[34 - bit_idx]) color = 12'hFFF;
+                        end
                     end
-                end else if (x >= P1_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
-                    col_idx = (x - (P1_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
+                    // I
+                    else if ((x >= msg_x0 + (MSG_CHAR_W + MSG_SPACING)) &&
+                             (x <  msg_x0 + (MSG_CHAR_W + MSG_SPACING) + MSG_CHAR_W)) begin
+                        col_idx = (x - (msg_x0 + (MSG_CHAR_W + MSG_SPACING))) / MSG_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (BM_I[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end
+                    // N
+                    else if ((x >= msg_x0 + 2*(MSG_CHAR_W + MSG_SPACING)) &&
+                             (x <  msg_x0 + 2*(MSG_CHAR_W + MSG_SPACING) + MSG_CHAR_W)) begin
+                        col_idx = (x - (msg_x0 + 2*(MSG_CHAR_W + MSG_SPACING))) / MSG_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (BM_N[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end
+                end else begin
+                    // "LOSE"
+                    // L
+                    if ((x >= msg_x0) && (x < msg_x0 + MSG_CHAR_W)) begin
+                        col_idx = (x - msg_x0) / MSG_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (BM_L[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end
+                    // O
+                    else if ((x >= msg_x0 + (MSG_CHAR_W + MSG_SPACING)) &&
+                             (x <  msg_x0 + (MSG_CHAR_W + MSG_SPACING) + MSG_CHAR_W)) begin
+                        col_idx = (x - (msg_x0 + (MSG_CHAR_W + MSG_SPACING))) / MSG_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (BM_O[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end
+                    // S
+                    else if ((x >= msg_x0 + 2*(MSG_CHAR_W + MSG_SPACING)) &&
+                             (x <  msg_x0 + 2*(MSG_CHAR_W + MSG_SPACING) + MSG_CHAR_W)) begin
+                        col_idx = (x - (msg_x0 + 2*(MSG_CHAR_W + MSG_SPACING))) / MSG_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (BM_S[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end
+                    // E
+                    else if ((x >= msg_x0 + 3*(MSG_CHAR_W + MSG_SPACING)) &&
+                             (x <  msg_x0 + 3*(MSG_CHAR_W + MSG_SPACING) + MSG_CHAR_W)) begin
+                        col_idx = (x - (msg_x0 + 3*(MSG_CHAR_W + MSG_SPACING))) / MSG_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (BM_E[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end
+                end
+            end
+        end
+
+        // ===================== NORMAL GAME RENDER =====================
+        else begin
+            // ---------------- LEFT SCORE ----------------
+            if ((x >= P1_SCORE_X) &&
+                (x <  P1_SCORE_X + ((score_left >= 10) ? DOUBLE_W : DIGIT_W)) &&
+                (y >= SCORE_Y) &&
+                (y <  SCORE_Y + DIGIT_H)) begin
+
+                row_idx = (y - SCORE_Y) / SCORE_SCALE;
+
+                if (score_left >= 10) begin
+                    if (x < P1_SCORE_X + DIGIT_W) begin
+                        col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (sl_tens_bm[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end else if (x >= P1_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
+                        col_idx = (x - (P1_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (sl_ones_bm[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end
+                end else begin
+                    col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
                     if (row_idx < 7 && col_idx < 5) begin
                         bit_idx = row_idx * 5 + col_idx;
                         if (sl_ones_bm[34 - bit_idx]) color = 12'hFFF;
                     end
                 end
-            end else begin
-                col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
-                if (row_idx < 7 && col_idx < 5) begin
-                    bit_idx = row_idx * 5 + col_idx;
-                    if (sl_ones_bm[34 - bit_idx]) color = 12'hFFF;
-                end
             end
-        end
 
-        // ---------------- RIGHT SCORE ----------------
-        else if ((x >= P2_SCORE_X) &&
-                 (x <  P2_SCORE_X + ((score_right >= 10) ? DOUBLE_W : DIGIT_W)) &&
-                 (y >= SCORE_Y) &&
-                 (y <  SCORE_Y + DIGIT_H)) begin
+            // ---------------- RIGHT SCORE ----------------
+            else if ((x >= P2_SCORE_X) &&
+                     (x <  P2_SCORE_X + ((score_right >= 10) ? DOUBLE_W : DIGIT_W)) &&
+                     (y >= SCORE_Y) &&
+                     (y <  SCORE_Y + DIGIT_H)) begin
 
-            row_idx = (y - SCORE_Y) / SCORE_SCALE;
+                row_idx = (y - SCORE_Y) / SCORE_SCALE;
 
-            if (score_right >= 10) begin
-                if (x < P2_SCORE_X + DIGIT_W) begin
-                    col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
-                    if (row_idx < 7 && col_idx < 5) begin
-                        bit_idx = row_idx * 5 + col_idx;
-                        if (sr_tens_bm[34 - bit_idx]) color = 12'hFFF;
+                if (score_right >= 10) begin
+                    if (x < P2_SCORE_X + DIGIT_W) begin
+                        col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (sr_tens_bm[34 - bit_idx]) color = 12'hFFF;
+                        end
+                    end else if (x >= P2_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
+                        col_idx = (x - (P2_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
+                        if (row_idx < 7 && col_idx < 5) begin
+                            bit_idx = row_idx * 5 + col_idx;
+                            if (sr_ones_bm[34 - bit_idx]) color = 12'hFFF;
+                        end
                     end
-                end else if (x >= P2_SCORE_X + DIGIT_W + DIGIT_SPACING) begin
-                    col_idx = (x - (P2_SCORE_X + DIGIT_W + DIGIT_SPACING)) / SCORE_SCALE;
+                end else begin
+                    col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
                     if (row_idx < 7 && col_idx < 5) begin
                         bit_idx = row_idx * 5 + col_idx;
                         if (sr_ones_bm[34 - bit_idx]) color = 12'hFFF;
                     end
                 end
-            end else begin
-                col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
-                if (row_idx < 7 && col_idx < 5) begin
-                    bit_idx = row_idx * 5 + col_idx;
-                    if (sr_ones_bm[34 - bit_idx]) color = 12'hFFF;
-                end
             end
-        end
 
-        // ---------------- CENTER LINE ----------------
-        else if ((x >= LINE_X0) && (x < LINE_X0 + LINE_W) && (y[4] == 1'b0)) begin
-            color = 12'hFFF;
-        end
-
-        // ---------------- BALL + PADDLES + ITEM ----------------
-        else begin
-            item_pix = item_active &&
-                       (x >= item_x) && (x < item_x + ITEM_SIZE) &&
-                       (y >= item_y) && (y < item_y + ITEM_SIZE);
-
-            ball_pix = (x >= ball_x) && (x < ball_x + BALL_SIZE) &&
-                       (y >= ball_y) && (y < ball_y + BALL_SIZE);
-
-            padl_pix = (x >= padl_x) && (x < padl_x + PAD_WIDTH) &&
-                       (y >= padl_y) && (y < padl_y + padl_h);
-
-            padr_pix = (x >= padr_x) && (x < padr_x + PAD_WIDTH) &&
-                       (y >= padr_y) && (y < padr_y + padr_h);
-
-            if (item_pix) begin
-                case (item_type)
-                    ITEM_LONG : color = 12'hF00; // red
-                    ITEM_SPEED: color = 12'h0FF; // cyan
-                    default  : color = 12'hFF0; // yellow (SLOW)
-                endcase
-            end else if (ball_pix)
-                color = 12'h0F0;
-            else if (padl_pix || padr_pix)
+            // ---------------- CENTER LINE ----------------
+            else if ((x >= LINE_X0) && (x < LINE_X0 + LINE_W) && (y[4] == 1'b0)) begin
                 color = 12'hFFF;
-            else
-                color = 12'h000;
+            end
+
+            // ---------------- BALL + PADDLES + ITEM ----------------
+            else begin
+                item_pix = item_active &&
+                           (x >= item_x) && (x < item_x + ITEM_SIZE) &&
+                           (y >= item_y) && (y < item_y + ITEM_SIZE);
+
+                ball_pix = (x >= ball_x) && (x < ball_x + BALL_SIZE) &&
+                           (y >= ball_y) && (y < ball_y + BALL_SIZE);
+
+                padl_pix = (x >= padl_x) && (x < padl_x + PAD_WIDTH) &&
+                           (y >= padl_y) && (y < padl_y + padl_h);
+
+                padr_pix = (x >= padr_x) && (x < padr_x + PAD_WIDTH) &&
+                           (y >= padr_y) && (y < padr_y + padr_h);
+
+                if (item_pix) begin
+                    case (item_type)
+                        ITEM_LONG : color = 12'hF00; // red
+                        ITEM_SPEED: color = 12'h0FF; // cyan
+                        default  : color = 12'hFF0; // yellow (SLOW)
+                    endcase
+                end else if (ball_pix)
+                    color = 12'h0F0;
+                else if (padl_pix || padr_pix)
+                    color = 12'hFFF;
+                else
+                    color = 12'h000;
+            end
         end
     end
 
@@ -421,6 +553,7 @@ module pong(
             ledR <= 0;
 
             win_cnt <= 0;
+            winner_left <= 1'b0;
 
             item_active     <= 1'b0;
             spawn_pending   <= 1'b0;
@@ -469,7 +602,6 @@ module pong(
                     item_y <= cand_y;
 
                     // random type among 3 items
-                    // 00/01/10 => LONG/SPEED/SLOW (11 maps to LONG)
                     case (lfsr[1:0])
                         2'b00: item_type <= ITEM_LONG;
                         2'b01: item_type <= ITEM_SPEED;
@@ -508,9 +640,10 @@ module pong(
                     // OUT LEFT?
                     if ((!ball_dx) && (ball_x < ball_spx)) begin
                         if (score_right == MAX_SCORE-1) begin
-                            score_right <= score_right + 1;
+                            score_right <= score_right + 1; // becomes 11
                             win_cnt     <= WIN_DELAY_FRAMES;
                             state       <= GAME_OVER;
+                            winner_left <= 1'b0; // right wins
                         end else begin
                             score_right <= score_right + 1;
                             state       <= NEW_GAME;
@@ -534,9 +667,10 @@ module pong(
                     // OUT RIGHT?
                     else if ((ball_dx) && (ball_x + BALL_SIZE + ball_spx >= SCREEN_W)) begin
                         if (score_left == MAX_SCORE-1) begin
-                            score_left <= score_left + 1;
+                            score_left <= score_left + 1; // becomes 11
                             win_cnt    <= WIN_DELAY_FRAMES;
                             state      <= GAME_OVER;
+                            winner_left <= 1'b1; // left wins
                         end else begin
                             score_left <= score_left + 1;
                             state      <= NEW_GAME;
@@ -571,10 +705,8 @@ module pong(
                                     p1_long_cnt  <= POWER_FRAMES;
                                 else if (item_type == ITEM_SPEED)
                                     p1_speed_cnt <= SPEED_FRAMES;
-                                else begin
-                                    // SLOW: slow opponent (player2)
-                                    p2_slow_cnt  <= SLOW_FRAMES;
-                                end
+                                else
+                                    p2_slow_cnt  <= SLOW_FRAMES; // slow opponent (player2)
 
                                 spawn_pending   <= 1'b0;
                                 spawn_delay_cnt <= RESPAWN_DELAY;
@@ -589,10 +721,8 @@ module pong(
                                     p2_long_cnt  <= POWER_FRAMES;
                                 else if (item_type == ITEM_SPEED)
                                     p2_speed_cnt <= SPEED_FRAMES;
-                                else begin
-                                    // SLOW: slow opponent (player1)
-                                    p1_slow_cnt  <= SLOW_FRAMES;
-                                end
+                                else
+                                    p1_slow_cnt  <= SLOW_FRAMES; // slow opponent (player1)
 
                                 spawn_pending   <= 1'b0;
                                 spawn_delay_cnt <= RESPAWN_DELAY;
@@ -713,6 +843,7 @@ module pong(
                 end
 
                 GAME_OVER: begin
+                    // freeze motion; just count down and reset scores
                     if (win_cnt == 0) begin
                         score_left  <= 0;
                         score_right <= 0;
