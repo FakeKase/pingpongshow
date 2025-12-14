@@ -15,7 +15,7 @@ module pong(
     input  btn1_up,
     input  btn1_dn,
     input  btn1_left,
-    input  btn1_right,   // ✅ comma
+    input  btn1_right,   // comma
 
     // VGA
     output HS,
@@ -128,6 +128,14 @@ module pong(
     localparam integer SCORE_MARGIN = 10; // เว้นระยะจากเส้นกลาง
     localparam P1_SCORE_X = LINE_X0 - SCORE_MARGIN - DOUBLE_W; // เผื่อ 2 หลักไว้ก่อน;
     localparam P2_SCORE_X = LINE_X0 + LINE_W + SCORE_MARGIN;   // ฝั่งขวาเริ่มหลังเส้น
+    
+    // ----------------- ITEM (Power-up) -----------------
+    localparam ITEM_SIZE = 12;
+    localparam ITEM_MARGIN = 8;                 // กันขอบจอ
+    localparam integer POWER_FRAMES = 60*15;    // 15s @ 60Hz = 900
+    localparam integer RESPAWN_DELAY = 60*2;    // หน่วงก่อนสุ่มใหม่ (2s) ปรับได้
+    
+
     // -------------------------------------------------------------------------
     // 4) State registers
     // -------------------------------------------------------------------------
@@ -142,6 +150,25 @@ module pong(
 
     reg [7:0] score_left;
     reg [7:0] score_right;
+    
+    // ----------------- ITEM (Power-up) regs -----------------
+    reg item_active;
+    reg spawn_pending;
+    reg [9:0] item_x, item_y;
+    reg [15:0] lfsr;
+    reg [15:0] p1_long_cnt, p2_long_cnt;       // เหลือเวลากี่เฟรม
+    wire p1_long = (p1_long_cnt != 0);
+    wire p2_long = (p2_long_cnt != 0);
+        
+    // "ความยาวไม้จริง" ตามพาวเวอร์
+    wire [9:0] padl_h = p1_long ? (PADL_HEIGHT*2) : PADL_HEIGHT;
+    wire [9:0] padr_h = p2_long ? (PADR_HEIGHT*2) : PADR_HEIGHT;
+
+    reg [15:0] spawn_delay_cnt;
+
+    // candidate from lfsr bits (cheap)
+    wire [9:0] cand_x = (lfsr[9:0]  % (SCREEN_W - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
+    wire [9:0] cand_y = (lfsr[15:6] % (SCREEN_H - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
 
     // scoring flags for current frame
     reg scored_l; // ball out LEFT  -> right scores
@@ -166,6 +193,37 @@ module pong(
             default: digit_bitmap = 35'b0;
         endcase
     endfunction
+    
+    // function ตำแหน่งต้องห้าม
+    function automatic is_bad_spawn;
+        input [9:0] sx;
+        input [9:0] sy;
+        reg in_left_score, in_right_score, in_center, out_border;
+    begin
+        // กันขอบจอ
+        out_border =
+            (sx < ITEM_MARGIN) ||
+            (sy < ITEM_MARGIN) ||
+            (sx + ITEM_SIZE >= SCREEN_W - ITEM_MARGIN) ||
+            (sy + ITEM_SIZE >= SCREEN_H - ITEM_MARGIN);
+    
+        // กันพื้นที่ Score (กันเต็ม DOUBLE_W ตลอด ชัวร์สุด)
+        in_left_score =
+            (sx < (P1_SCORE_X + DOUBLE_W)) && (sx + ITEM_SIZE > P1_SCORE_X) &&
+            (sy < (SCORE_Y + DIGIT_H))     && (sy + ITEM_SIZE > SCORE_Y);
+    
+        in_right_score =
+            (sx < (P2_SCORE_X + DOUBLE_W)) && (sx + ITEM_SIZE > P2_SCORE_X) &&
+            (sy < (SCORE_Y + DIGIT_H))     && (sy + ITEM_SIZE > SCORE_Y);
+    
+        // กันเส้นกลาง
+        in_center =
+            (sx < (LINE_X0 + LINE_W)) && (sx + ITEM_SIZE > LINE_X0);
+    
+        is_bad_spawn = out_border || in_left_score || in_right_score || in_center;
+    end
+    endfunction
+
 
     wire [3:0] sl_tens = score_left / 10;
     wire [3:0] sl_ones = score_left % 10;
@@ -184,6 +242,7 @@ module pong(
 
     // pixel flags
     reg ball_pix, padl_pix, padr_pix;
+    reg item_pix;
 
     // -------------------------------------------------------------------------
     // 6) Rendering (combinational)
@@ -198,6 +257,10 @@ module pong(
         ball_pix = 0;
         padl_pix = 0;
         padr_pix = 0;
+         
+        item_pix = 0;
+       
+
 
         // ---------------- LEFT SCORE ----------------
         if ((x >= P1_SCORE_X) &&
@@ -280,21 +343,29 @@ module pong(
 
         // ---------------- BALL + PADDLES ----------------
         else begin
+            item_pix = item_active &&
+                   (x >= item_x) && (x < item_x + ITEM_SIZE) &&
+                   (y >= item_y) && (y < item_y + ITEM_SIZE);
+        
             ball_pix = (x >= ball_x) && (x < ball_x + BALL_SIZE) &&
                        (y >= ball_y) && (y < ball_y + BALL_SIZE);
-
+            
             padl_pix = (x >= padl_x) && (x < padl_x + PAD_WIDTH) &&
-                       (y >= padl_y) && (y < padl_y + PADL_HEIGHT);
-
+                       (y >= padl_y) && (y < padl_y + padl_h);
+            
             padr_pix = (x >= padr_x) && (x < padr_x + PAD_WIDTH) &&
-                       (y >= padr_y) && (y < padr_y + PADR_HEIGHT);
-
-            if (ball_pix)
-                color = 12'h0F0;   // green ball
+                       (y >= padr_y) && (y < padr_y + padr_h);
+        
+            if (item_pix)
+                color = 12'hF00;   // red item
+            else if (ball_pix)
+                color = 12'h0F0;
             else if (padl_pix || padr_pix)
-                color = 12'hFFF;   // white paddles
+                color = 12'hFFF;
             else
-                color = 12'h000;   // black bg
+                color = 12'h000;
+
+
         end
     end
 
@@ -331,12 +402,60 @@ module pong(
             scored_l <= 0;
             scored_r <= 0;
             win_cnt <= 0;
+            
+            // item
+            item_active   <= 1'b0;
+            spawn_pending <= 1'b0;
+            item_x <= 100;
+            item_y <= 200;
+            
+            lfsr <= 16'hACE1;
+            
+            p1_long_cnt <= 0;
+            p2_long_cnt <= 0;
+            
+            spawn_delay_cnt <= 0;
+
+
         end
         else if (frame_tick) begin
 
             // optional debug LEDs (low nibble)
             ledL <= score_left[3:0];
             ledR <= score_right[3:0];
+            
+            // LFSR (16-bit) update each frame
+            lfsr <= {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
+            
+            // power countdown
+            if (p1_long_cnt != 0) p1_long_cnt <= p1_long_cnt - 1;
+            if (p2_long_cnt != 0) p2_long_cnt <= p2_long_cnt - 1;
+
+            // request spawn when no item on screen
+//            if (!item_active && !spawn_pending) begin
+//                spawn_pending <= 1'b1;     // เริ่มโหมดหา spot
+//            end
+            
+            
+            
+            // ----------------- spawn delay + request spawn -----------------
+            if (!item_active) begin
+                if (spawn_delay_cnt != 0)
+                    spawn_delay_cnt <= spawn_delay_cnt - 1;
+                else if (!spawn_pending)
+                    spawn_pending <= 1'b1;
+            end
+            
+            // if pending, try place this frame
+                        if (spawn_pending) begin
+                            if (!is_bad_spawn(cand_x, cand_y)) begin
+                                item_x <= cand_x;
+                                item_y <= cand_y;
+                                item_active <= 1'b1;
+                                spawn_pending <= 1'b0;
+                            end
+                        end
+
 
             case (state)
             
@@ -408,11 +527,39 @@ module pong(
             
                   // 3) ไม่ OUT -> เดินลูก + ชน + เดินไม้
                   else begin
+                      // ----------------- ITEM PICKUP -----------------
+                      if (item_active) begin
+                          // paddle1 intersect item ?
+                          if ((padl_x < item_x + ITEM_SIZE) && (padl_x + PAD_WIDTH > item_x) &&
+                              (padl_y < item_y + ITEM_SIZE) && (padl_y + padl_h     > item_y)) begin
+                      
+                              item_active <= 1'b0;
+                              p1_long_cnt <= POWER_FRAMES;
+                      
+                              // หน่วงก่อนเกิดใหม่
+                              spawn_pending <= 1'b0;
+                              spawn_delay_cnt <= RESPAWN_DELAY;
+
+                
+                          end
+                          // paddle2 intersect item ?
+                          else if ((padr_x < item_x + ITEM_SIZE) && (padr_x + PAD_WIDTH > item_x) &&
+                                   (padr_y < item_y + ITEM_SIZE) && (padr_y + padr_h     > item_y)) begin
+                      
+                              item_active <= 1'b0;
+                              p2_long_cnt <= POWER_FRAMES;
+                      
+                              spawn_pending <= 1'b0;
+                              spawn_delay_cnt <= RESPAWN_DELAY;
+
+                          end
+                      end
+
                       // --------- Ball X ---------
                       if (ball_dx) begin // right
                           if ((ball_x + BALL_SIZE + BALL_SPX >= padr_x) &&
                               (ball_y + BALL_SIZE >= padr_y) &&
-                              (ball_y <= padr_y + PADR_HEIGHT)) begin
+                              (ball_y <= padr_y + padr_h)) begin
                               ball_dx <= 1'b0;
                               ball_x  <= padr_x - BALL_SIZE - 1;
                           end else begin
@@ -422,7 +569,7 @@ module pong(
                           if ((ball_x > padl_x + PAD_WIDTH) &&
                               (ball_x - BALL_SPX <= padl_x + PAD_WIDTH) &&
                               (ball_y + BALL_SIZE >= padl_y) &&
-                              (ball_y <= padl_y + PADL_HEIGHT)) begin
+                              (ball_y <= padl_y + padl_h)) begin
                               ball_dx <= 1'b1;
                               ball_x  <= padl_x + PAD_WIDTH + 1;
                           end else begin
@@ -449,8 +596,8 @@ module pong(
             
                       // --------- Player 1 (LEFT) Y ---------
                       if (p1_dn) begin
-                          if (padl_y + PADL_HEIGHT + PADL_SPY >= SCREEN_H)
-                              padl_y <= SCREEN_H - PADL_HEIGHT;
+                          if (padl_y + padl_h + PADL_SPY >= SCREEN_H)
+                              padl_y <= SCREEN_H - padl_h;
                           else
                               padl_y <= padl_y + PADL_SPY;
                       end
@@ -478,8 +625,8 @@ module pong(
             
                       // --------- Player 2 (RIGHT) Y ---------
                       if (p2_dn) begin
-                          if (padr_y + PADR_HEIGHT + PADR_SPY >= SCREEN_H)
-                              padr_y <= SCREEN_H - PADR_HEIGHT;
+                          if (padr_y + padr_h + PADR_SPY >= SCREEN_H)
+                              padr_y <= SCREEN_H - padr_h;
                           else
                               padr_y <= padr_y + PADR_SPY;
                       end else if (p2_up) begin
