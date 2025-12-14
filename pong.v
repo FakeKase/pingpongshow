@@ -1,21 +1,27 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
 // Pong for Basys-3 - 2 Players (VGA score on-screen)
-// - Player 1: on-board buttons (active-high)
-// - Player 2: external buttons on PMOD (active-low with PULLUP in XDC)
-// - Paddles: move UP/DOWN/LEFT/RIGHT
-// - Score: reset BOTH to 0 when either side would reach 11
+// - Player 1: external buttons (active-low -> invert inside)
+// - Player 2: external buttons on PMOD (active-low -> invert inside)
+// - Paddles: move UP/DOWN/LEFT/RIGHT within their half
+// - Score: if either side reaches 11 -> GAME_OVER -> after delay reset both to 0
+//
+// Power-ups (spawn randomly, NOT overlapping score area / center line / borders):
+// 1) LONG  (red)  : paddle becomes 2x height for 15 seconds
+// 2) SPEED (cyan) : when that side hits the ball, ball speed becomes 1.5x for 10 seconds
+//
+// NOTE: On NEW_GAME and OUT LEFT/OUT RIGHT -> reset ball speed to base (BALL_SPX/BALL_SPY)
 //////////////////////////////////////////////////////////////////////////////////
 
 module pong(
     input  clk,
     input  btn_reset,
 
-    // Player 1 (external now)
+    // Player 1
     input  btn1_up,
     input  btn1_dn,
     input  btn1_left,
-    input  btn1_right,   // comma
+    input  btn1_right,
 
     // VGA
     output HS,
@@ -50,18 +56,19 @@ module pong(
         .y(y),
         .blank(blank)
     );
-    
-    // Player 1 buttons: active-low -> invert to active-high
-    wire p1_up    = ~btn1_up;
-    wire p1_dn    = ~btn1_dn;
-    wire p1_left  = ~btn1_left;
-    wire p1_right = ~btn1_right;
 
-    // Player 2 buttons: active-low -> invert to active-high
-    wire p2_up    = ~btn2_up;
-    wire p2_dn    = ~btn2_dn;
-    wire p2_left  = ~btn2_left;
-    wire p2_right = ~btn2_right;
+    // Buttons: active-low -> invert to active-high
+    wire p1_up, p1_dn, p1_left, p1_right;
+    wire p2_up, p2_dn, p2_left, p2_right;
+    assign p1_up    = ~btn1_up;
+    assign p1_dn    = ~btn1_dn;
+    assign p1_left  = ~btn1_left;
+    assign p1_right = ~btn1_right;
+
+    assign p2_up    = ~btn2_up;
+    assign p2_dn    = ~btn2_dn;
+    assign p2_left  = ~btn2_left;
+    assign p2_right = ~btn2_right;
 
     // -------------------------------------------------------------------------
     // 2) Frame tick generator (~60Hz): rising edge of VS
@@ -69,72 +76,78 @@ module pong(
     reg VS_old;
     wire frame_tick;
 
-    always @(posedge clk)
+    always @(posedge clk) begin
         VS_old <= VS;
+    end
 
-    assign frame_tick = (VS == 1 && VS_old == 0);
+    assign frame_tick = (VS == 1'b1) && (VS_old == 1'b0);
 
     // -------------------------------------------------------------------------
     // 3) Game parameters
     // -------------------------------------------------------------------------
     localparam SCREEN_W = 640;
     localparam SCREEN_H = 480;
-    
+
     localparam PAD_WIDTH   = 10;
     localparam PADL_HEIGHT = 48;
     localparam PADR_HEIGHT = 48;
-    
+
     localparam MID_X = SCREEN_W/2;      // 320
     localparam GAP   = 4;
-    
+
     // paddle allowed x range (top-left of paddle)
     localparam P1_X_MIN = 0;
     localparam P1_X_MAX = MID_X - GAP - PAD_WIDTH;
-    
+
     localparam P2_X_MIN = MID_X + GAP;
     localparam P2_X_MAX = SCREEN_W - PAD_WIDTH;
-    
+
     // center line
     localparam LINE_W  = 4;
     localparam LINE_X0 = MID_X - (LINE_W/2);
-    
+
     localparam BALL_SIZE = 8;
-    localparam BALL_SPX  = 3;
+    localparam BALL_SPX  = 3;   // base speed
     localparam BALL_SPY  = 3;
-    
+
     localparam PAD_OFFS = 32;
-    
+
     localparam PADL_SPX = 5;
     localparam PADL_SPY = 5;
     localparam PADR_SPX = 5;
     localparam PADR_SPY = 5;
-    
+
     localparam MAX_SCORE = 11;
-    
+
     // FSM
-    localparam NEW_GAME = 2'b00;
-    localparam PLAY     = 2'b01;
+    localparam NEW_GAME  = 2'b00;
+    localparam PLAY      = 2'b01;
     localparam GAME_OVER = 2'b10;
     localparam integer WIN_DELAY_FRAMES = 60;
     reg [15:0] win_cnt;
-    
+
+    // Score rendering
     localparam SCORE_SCALE   = 6;
     localparam DIGIT_W       = 5 * SCORE_SCALE;
     localparam DIGIT_H       = 7 * SCORE_SCALE;
     localparam DIGIT_SPACING = SCORE_SCALE * 2;
     localparam DOUBLE_W      = DIGIT_W * 2 + DIGIT_SPACING;
-    
+
     localparam SCORE_Y    = 30;
-    localparam integer SCORE_MARGIN = 10; // เว้นระยะจากเส้นกลาง
-    localparam P1_SCORE_X = LINE_X0 - SCORE_MARGIN - DOUBLE_W; // เผื่อ 2 หลักไว้ก่อน;
-    localparam P2_SCORE_X = LINE_X0 + LINE_W + SCORE_MARGIN;   // ฝั่งขวาเริ่มหลังเส้น
-    
+    localparam integer SCORE_MARGIN = 10;
+    localparam P1_SCORE_X = LINE_X0 - SCORE_MARGIN - DOUBLE_W;
+    localparam P2_SCORE_X = LINE_X0 + LINE_W + SCORE_MARGIN;
+
     // ----------------- ITEM (Power-up) -----------------
-    localparam ITEM_SIZE = 12;
-    localparam ITEM_MARGIN = 8;                 // กันขอบจอ
-    localparam integer POWER_FRAMES = 60*15;    // 15s @ 60Hz = 900
-    localparam integer RESPAWN_DELAY = 60*2;    // หน่วงก่อนสุ่มใหม่ (2s) ปรับได้
-    
+    localparam ITEM_SIZE   = 12;
+    localparam ITEM_MARGIN = 8;
+
+    localparam integer POWER_FRAMES  = 60*15; // LONG: 15s
+    localparam integer SPEED_FRAMES  = 60*10; // SPEED: 10s
+    localparam integer RESPAWN_DELAY = 60*2;  // 2s
+
+    localparam ITEM_LONG  = 1'b0; // red
+    localparam ITEM_SPEED = 1'b1; // cyan
 
     // -------------------------------------------------------------------------
     // 4) State registers
@@ -144,87 +157,92 @@ module pong(
     reg [9:0] ball_x, ball_y;
     reg       ball_dx;    // 1 = right, 0 = left
     reg       ball_dy;    // 1 = up,    0 = down
+    reg [3:0] ball_spx, ball_spy; // current speed (base or boosted)
 
     reg [9:0] padl_x, padl_y;
     reg [9:0] padr_x, padr_y;
 
     reg [7:0] score_left;
     reg [7:0] score_right;
-    
-    // ----------------- ITEM (Power-up) regs -----------------
-    reg item_active;
-    reg spawn_pending;
-    reg [9:0] item_x, item_y;
+
+    // ITEM regs
+    reg        item_active;
+    reg        spawn_pending;
+    reg        item_type;           // 0=LONG, 1=SPEED
+    reg [9:0]  item_x, item_y;
     reg [15:0] lfsr;
-    reg [15:0] p1_long_cnt, p2_long_cnt;       // เหลือเวลากี่เฟรม
-    wire p1_long = (p1_long_cnt != 0);
-    wire p2_long = (p2_long_cnt != 0);
-        
-    // "ความยาวไม้จริง" ตามพาวเวอร์
-    wire [9:0] padl_h = p1_long ? (PADL_HEIGHT*2) : PADL_HEIGHT;
-    wire [9:0] padr_h = p2_long ? (PADR_HEIGHT*2) : PADR_HEIGHT;
+
+    reg [15:0] p1_long_cnt,  p2_long_cnt;
+    reg [15:0] p1_speed_cnt, p2_speed_cnt;
 
     reg [15:0] spawn_delay_cnt;
 
-    // candidate from lfsr bits (cheap)
-    wire [9:0] cand_x = (lfsr[9:0]  % (SCREEN_W - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
-    wire [9:0] cand_y = (lfsr[15:6] % (SCREEN_H - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
+    // effect flags + real paddle heights
+    wire p1_long, p2_long, p1_speed, p2_speed;
+    assign p1_long  = (p1_long_cnt  != 0);
+    assign p2_long  = (p2_long_cnt  != 0);
+    assign p1_speed = (p1_speed_cnt != 0);
+    assign p2_speed = (p2_speed_cnt != 0);
 
-    // scoring flags for current frame
-    reg scored_l; // ball out LEFT  -> right scores
-    reg scored_r; // ball out RIGHT -> left scores
+    wire [9:0] padl_h, padr_h;
+    assign padl_h = p1_long ? (PADL_HEIGHT*2) : PADL_HEIGHT;
+    assign padr_h = p2_long ? (PADR_HEIGHT*2) : PADR_HEIGHT;
+
+    // candidate spawn from LFSR
+    wire [9:0] cand_x, cand_y;
+    assign cand_x = (lfsr[9:0]  % (SCREEN_W - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
+    assign cand_y = (lfsr[15:6] % (SCREEN_H - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
 
     // -------------------------------------------------------------------------
     // 5) Digit bitmap (5x7 = 35 bits)
     // -------------------------------------------------------------------------
     function [34:0] digit_bitmap;
         input [3:0] value;
-        case (value)
-            4'd0: digit_bitmap = 35'b11111_10001_10001_10001_10001_10001_11111;
-            4'd1: digit_bitmap = 35'b00100_01100_00100_00100_00100_00100_01110;
-            4'd2: digit_bitmap = 35'b11111_00001_00001_11111_10000_10000_11111;
-            4'd3: digit_bitmap = 35'b11111_00001_00001_11111_00001_00001_11111;
-            4'd4: digit_bitmap = 35'b10001_10001_10001_11111_00001_00001_00001;
-            4'd5: digit_bitmap = 35'b11111_10000_10000_11111_00001_00001_11111;
-            4'd6: digit_bitmap = 35'b11111_10000_10000_11111_10001_10001_11111;
-            4'd7: digit_bitmap = 35'b11111_00001_00001_00001_00001_00001_00001;
-            4'd8: digit_bitmap = 35'b11111_10001_10001_11111_10001_10001_11111;
-            4'd9: digit_bitmap = 35'b11111_10001_10001_11111_00001_00001_11111;
-            default: digit_bitmap = 35'b0;
-        endcase
+        begin
+            case (value)
+                4'd0: digit_bitmap = 35'b11111_10001_10001_10001_10001_10001_11111;
+                4'd1: digit_bitmap = 35'b00100_01100_00100_00100_00100_00100_01110;
+                4'd2: digit_bitmap = 35'b11111_00001_00001_11111_10000_10000_11111;
+                4'd3: digit_bitmap = 35'b11111_00001_00001_11111_00001_00001_11111;
+                4'd4: digit_bitmap = 35'b10001_10001_10001_11111_00001_00001_00001;
+                4'd5: digit_bitmap = 35'b11111_10000_10000_11111_00001_00001_11111;
+                4'd6: digit_bitmap = 35'b11111_10000_10000_11111_10001_10001_11111;
+                4'd7: digit_bitmap = 35'b11111_00001_00001_00001_00001_00001_00001;
+                4'd8: digit_bitmap = 35'b11111_10001_10001_11111_10001_10001_11111;
+                4'd9: digit_bitmap = 35'b11111_10001_10001_11111_00001_00001_11111;
+                default: digit_bitmap = 35'b0;
+            endcase
+        end
     endfunction
-    
-    // function ตำแหน่งต้องห้าม
+
+    // forbid spawn in: borders, score areas, center line
     function automatic is_bad_spawn;
         input [9:0] sx;
         input [9:0] sy;
         reg in_left_score, in_right_score, in_center, out_border;
-    begin
-        // กันขอบจอ
-        out_border =
-            (sx < ITEM_MARGIN) ||
-            (sy < ITEM_MARGIN) ||
-            (sx + ITEM_SIZE >= SCREEN_W - ITEM_MARGIN) ||
-            (sy + ITEM_SIZE >= SCREEN_H - ITEM_MARGIN);
-    
-        // กันพื้นที่ Score (กันเต็ม DOUBLE_W ตลอด ชัวร์สุด)
-        in_left_score =
-            (sx < (P1_SCORE_X + DOUBLE_W)) && (sx + ITEM_SIZE > P1_SCORE_X) &&
-            (sy < (SCORE_Y + DIGIT_H))     && (sy + ITEM_SIZE > SCORE_Y);
-    
-        in_right_score =
-            (sx < (P2_SCORE_X + DOUBLE_W)) && (sx + ITEM_SIZE > P2_SCORE_X) &&
-            (sy < (SCORE_Y + DIGIT_H))     && (sy + ITEM_SIZE > SCORE_Y);
-    
-        // กันเส้นกลาง
-        in_center =
-            (sx < (LINE_X0 + LINE_W)) && (sx + ITEM_SIZE > LINE_X0);
-    
-        is_bad_spawn = out_border || in_left_score || in_right_score || in_center;
-    end
+        begin
+            out_border =
+                (sx < ITEM_MARGIN) ||
+                (sy < ITEM_MARGIN) ||
+                (sx + ITEM_SIZE >= SCREEN_W - ITEM_MARGIN) ||
+                (sy + ITEM_SIZE >= SCREEN_H - ITEM_MARGIN);
+
+            in_left_score =
+                (sx < (P1_SCORE_X + DOUBLE_W)) && (sx + ITEM_SIZE > P1_SCORE_X) &&
+                (sy < (SCORE_Y + DIGIT_H))     && (sy + ITEM_SIZE > SCORE_Y);
+
+            in_right_score =
+                (sx < (P2_SCORE_X + DOUBLE_W)) && (sx + ITEM_SIZE > P2_SCORE_X) &&
+                (sy < (SCORE_Y + DIGIT_H))     && (sy + ITEM_SIZE > SCORE_Y);
+
+            in_center =
+                (sx < (LINE_X0 + LINE_W)) && (sx + ITEM_SIZE > LINE_X0);
+
+            is_bad_spawn = out_border || in_left_score || in_right_score || in_center;
+        end
     endfunction
 
-
+    // score digits
     wire [3:0] sl_tens = score_left / 10;
     wire [3:0] sl_ones = score_left % 10;
     wire [3:0] sr_tens = score_right / 10;
@@ -241,8 +259,7 @@ module pong(
     reg [5:0] bit_idx;
 
     // pixel flags
-    reg ball_pix, padl_pix, padr_pix;
-    reg item_pix;
+    reg ball_pix, padl_pix, padr_pix, item_pix;
 
     // -------------------------------------------------------------------------
     // 6) Rendering (combinational)
@@ -257,10 +274,7 @@ module pong(
         ball_pix = 0;
         padl_pix = 0;
         padr_pix = 0;
-         
         item_pix = 0;
-       
-
 
         // ---------------- LEFT SCORE ----------------
         if ((x >= P1_SCORE_X) &&
@@ -287,8 +301,7 @@ module pong(
                         if (sl_ones_bm[34 - bit_idx]) color = 12'hFFF;
                     end
                 end
-            end
-            else begin
+            end else begin
                 // single digit
                 col_idx = (x - P1_SCORE_X) / SCORE_SCALE;
                 if (row_idx < 7 && col_idx < 5) begin
@@ -323,8 +336,7 @@ module pong(
                         if (sr_ones_bm[34 - bit_idx]) color = 12'hFFF;
                     end
                 end
-            end
-            else begin
+            end else begin
                 // single digit
                 col_idx = (x - P2_SCORE_X) / SCORE_SCALE;
                 if (row_idx < 7 && col_idx < 5) begin
@@ -333,51 +345,46 @@ module pong(
                 end
             end
         end
-        
+
         // ---------------- CENTER LINE ----------------
-        else if ((x >= LINE_X0) && (x < LINE_X0 + LINE_W) &&
-                 (y[4] == 1'b0)) begin
-            // y[4]==0 ทำให้เป็นเส้นประ (สลับทุก 16 พิกเซล)
-            color = 12'hFFF; // สีขาว
+        else if ((x >= LINE_X0) && (x < LINE_X0 + LINE_W) && (y[4] == 1'b0)) begin
+            color = 12'hFFF;
         end
 
-        // ---------------- BALL + PADDLES ----------------
+        // ---------------- BALL + PADDLES + ITEM ----------------
         else begin
             item_pix = item_active &&
-                   (x >= item_x) && (x < item_x + ITEM_SIZE) &&
-                   (y >= item_y) && (y < item_y + ITEM_SIZE);
-        
+                       (x >= item_x) && (x < item_x + ITEM_SIZE) &&
+                       (y >= item_y) && (y < item_y + ITEM_SIZE);
+
             ball_pix = (x >= ball_x) && (x < ball_x + BALL_SIZE) &&
                        (y >= ball_y) && (y < ball_y + BALL_SIZE);
-            
+
             padl_pix = (x >= padl_x) && (x < padl_x + PAD_WIDTH) &&
                        (y >= padl_y) && (y < padl_y + padl_h);
-            
+
             padr_pix = (x >= padr_x) && (x < padr_x + PAD_WIDTH) &&
                        (y >= padr_y) && (y < padr_y + padr_h);
-        
+
             if (item_pix)
-                color = 12'hF00;   // red item
+                color = (item_type == ITEM_SPEED) ? 12'h0FF : 12'hF00; // SPEED=cyan, LONG=red
             else if (ball_pix)
                 color = 12'h0F0;
             else if (padl_pix || padr_pix)
                 color = 12'hFFF;
             else
                 color = 12'h000;
-
-
         end
     end
 
-    assign RED   = (blank ? 0 : color[11:8]);
-    assign GREEN = (blank ? 0 : color[7:4]);
-    assign BLUE  = (blank ? 0 : color[3:0]);
+    assign RED   = (blank ? 4'b0000 : color[11:8]);
+    assign GREEN = (blank ? 4'b0000 : color[7:4]);
+    assign BLUE  = (blank ? 4'b0000 : color[3:0]);
 
     // -------------------------------------------------------------------------
     // 7) Game update (sequential) - update only on frame_tick
     // -------------------------------------------------------------------------
     always @(posedge clk) begin
-    
         if (btn_reset) begin
             state <= NEW_GAME;
 
@@ -390,8 +397,10 @@ module pong(
             ball_x <= SCREEN_W/2 - BALL_SIZE/2;
             ball_y <= SCREEN_H/2 - BALL_SIZE/2;
 
-            ball_dx <= 1;
-            ball_dy <= 0;
+            ball_dx  <= 1'b1;
+            ball_dy  <= 1'b0;
+            ball_spx <= BALL_SPX;
+            ball_spy <= BALL_SPY;
 
             score_left  <= 0;
             score_right <= 0;
@@ -399,271 +408,295 @@ module pong(
             ledL <= 0;
             ledR <= 0;
 
-            scored_l <= 0;
-            scored_r <= 0;
             win_cnt <= 0;
-            
-            // item
-            item_active   <= 1'b0;
-            spawn_pending <= 1'b0;
-            item_x <= 100;
-            item_y <= 200;
-            
-            lfsr <= 16'hACE1;
-            
-            p1_long_cnt <= 0;
-            p2_long_cnt <= 0;
-            
+
+            // items/effects
+            item_active     <= 1'b0;
+            spawn_pending   <= 1'b0;
+            item_type       <= ITEM_LONG;
+            item_x          <= 100;
+            item_y          <= 200;
+            lfsr            <= 16'hACE1;
+
+            p1_long_cnt     <= 0;
+            p2_long_cnt     <= 0;
+            p1_speed_cnt    <= 0;
+            p2_speed_cnt    <= 0;
+
             spawn_delay_cnt <= 0;
 
+        end else if (frame_tick) begin
 
-        end
-        else if (frame_tick) begin
-
-            // optional debug LEDs (low nibble)
+            // debug LEDs
             ledL <= score_left[3:0];
             ledR <= score_right[3:0];
-            
-            // LFSR (16-bit) update each frame
-            lfsr <= {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
-            
-            // power countdown
-            if (p1_long_cnt != 0) p1_long_cnt <= p1_long_cnt - 1;
-            if (p2_long_cnt != 0) p2_long_cnt <= p2_long_cnt - 1;
 
-            // request spawn when no item on screen
-//            if (!item_active && !spawn_pending) begin
-//                spawn_pending <= 1'b1;     // เริ่มโหมดหา spot
-//            end
-            
-            
-            
-            // ----------------- spawn delay + request spawn -----------------
+            // LFSR update
+            lfsr <= {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
+
+            // countdown effects
+            if (p1_long_cnt  != 0) p1_long_cnt  <= p1_long_cnt  - 1;
+            if (p2_long_cnt  != 0) p2_long_cnt  <= p2_long_cnt  - 1;
+            if (p1_speed_cnt != 0) p1_speed_cnt <= p1_speed_cnt - 1;
+            if (p2_speed_cnt != 0) p2_speed_cnt <= p2_speed_cnt - 1;
+
+            // spawn delay + request spawn
             if (!item_active) begin
                 if (spawn_delay_cnt != 0)
                     spawn_delay_cnt <= spawn_delay_cnt - 1;
                 else if (!spawn_pending)
                     spawn_pending <= 1'b1;
             end
-            
+
             // if pending, try place this frame
-                        if (spawn_pending) begin
-                            if (!is_bad_spawn(cand_x, cand_y)) begin
-                                item_x <= cand_x;
-                                item_y <= cand_y;
-                                item_active <= 1'b1;
-                                spawn_pending <= 1'b0;
+            if (spawn_pending) begin
+                if (!is_bad_spawn(cand_x, cand_y)) begin
+                    item_x <= cand_x;
+                    item_y <= cand_y;
+                    item_type <= (lfsr[0] ? ITEM_SPEED : ITEM_LONG); // 50/50
+                    item_active <= 1'b1;
+                    spawn_pending <= 1'b0;
+                end
+            end
+
+            case (state)
+
+                NEW_GAME: begin
+                    // reset positions
+                    ball_x <= SCREEN_W/2 - BALL_SIZE/2;
+                    ball_y <= SCREEN_H/2 - BALL_SIZE/2;
+
+                    padl_x <= PAD_OFFS;
+                    padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
+
+                    padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
+                    padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
+
+                    ball_dx  <= 1'b1;
+                    ball_dy  <= 1'b0;
+
+                    // ? reset speed to base on new round
+                    ball_spx <= BALL_SPX;
+                    ball_spy <= BALL_SPY;
+
+                    state <= PLAY;
+                end
+
+                PLAY: begin
+                    // 1) OUT LEFT? -> right scores
+                    if ((!ball_dx) && (ball_x < ball_spx)) begin
+
+                        if (score_right == MAX_SCORE-1) begin
+                            score_right <= score_right + 1;
+                            win_cnt     <= WIN_DELAY_FRAMES;
+                            state       <= GAME_OVER;
+                        end else begin
+                            score_right <= score_right + 1;
+                            state       <= NEW_GAME;
+                        end
+
+                        // reset round positions
+                        ball_x  <= SCREEN_W/2 - BALL_SIZE/2;
+                        ball_y  <= SCREEN_H/2 - BALL_SIZE/2;
+                        ball_dx <= 1'b1;
+                        ball_dy <= 1'b0;
+
+                        // ? reset speed to base on OUT
+                        ball_spx <= BALL_SPX;
+                        ball_spy <= BALL_SPY;
+
+                        padl_x <= PAD_OFFS;
+                        padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
+                        padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
+                        padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
+                    end
+
+                    // 2) OUT RIGHT? -> left scores
+                    else if ((ball_dx) && (ball_x + BALL_SIZE + ball_spx >= SCREEN_W)) begin
+
+                        if (score_left == MAX_SCORE-1) begin
+                            score_left <= score_left + 1;
+                            win_cnt    <= WIN_DELAY_FRAMES;
+                            state      <= GAME_OVER;
+                        end else begin
+                            score_left <= score_left + 1;
+                            state      <= NEW_GAME;
+                        end
+
+                        // reset round positions
+                        ball_x  <= SCREEN_W/2 - BALL_SIZE/2;
+                        ball_y  <= SCREEN_H/2 - BALL_SIZE/2;
+                        ball_dx <= 1'b1;
+                        ball_dy <= 1'b0;
+
+                        // ? reset speed to base on OUT
+                        ball_spx <= BALL_SPX;
+                        ball_spy <= BALL_SPY;
+
+                        padl_x <= PAD_OFFS;
+                        padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
+                        padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
+                        padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
+                    end
+
+                    // 3) normal play
+                    else begin
+                        // ----------------- ITEM PICKUP -----------------
+                        if (item_active) begin
+                            // paddle1 pickup
+                            if ((padl_x < item_x + ITEM_SIZE) && (padl_x + PAD_WIDTH > item_x) &&
+                                (padl_y < item_y + ITEM_SIZE) && (padl_y + padl_h     > item_y)) begin
+
+                                item_active <= 1'b0;
+
+                                if (item_type == ITEM_LONG)
+                                    p1_long_cnt  <= POWER_FRAMES;
+                                else
+                                    p1_speed_cnt <= SPEED_FRAMES;
+
+                                spawn_pending   <= 1'b0;
+                                spawn_delay_cnt <= RESPAWN_DELAY;
+                            end
+                            // paddle2 pickup
+                            else if ((padr_x < item_x + ITEM_SIZE) && (padr_x + PAD_WIDTH > item_x) &&
+                                     (padr_y < item_y + ITEM_SIZE) && (padr_y + padr_h     > item_y)) begin
+
+                                item_active <= 1'b0;
+
+                                if (item_type == ITEM_LONG)
+                                    p2_long_cnt  <= POWER_FRAMES;
+                                else
+                                    p2_speed_cnt <= SPEED_FRAMES;
+
+                                spawn_pending   <= 1'b0;
+                                spawn_delay_cnt <= RESPAWN_DELAY;
                             end
                         end
 
+                        // --------- Ball X + paddle collision ---------
+                        if (ball_dx) begin // moving right
+                            if ((ball_x + BALL_SIZE + ball_spx >= padr_x) &&
+                                (ball_y + BALL_SIZE >= padr_y) &&
+                                (ball_y <= padr_y + padr_h)) begin
 
-            case (state)
-            
-              NEW_GAME: begin
-                  ball_x <= SCREEN_W/2 - BALL_SIZE/2;
-                  ball_y <= SCREEN_H/2 - BALL_SIZE/2;
-            
-                  padl_x <= PAD_OFFS;
-                  padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
-            
-                  padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
-                  padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
-            
-                  ball_dx <= 1'b1;
-                  ball_dy <= 1'b0;
-            
-                  state <= PLAY;
-              end
-            
-              PLAY: begin
-                  // 1) OUT LEFT? (ขอบซ้าย) -> right scores
-                  if ((!ball_dx) && (ball_x < BALL_SPX)) begin
-            
-                      // อัปเดตคะแนน: 10->11 แล้วเข้า GAME_OVER
-                      if (score_right == MAX_SCORE-1) begin
-                          score_right <= score_right + 1;     // = 11
-                          win_cnt     <= WIN_DELAY_FRAMES;
-                          state       <= GAME_OVER;
-                      end else begin
-                          score_right <= score_right + 1;
-                          state       <= NEW_GAME;
-                      end
-            
-                      // reset round กันนับซ้ำ (และให้ค้างกลางตอน GAME_OVER)
-                      ball_x  <= SCREEN_W/2 - BALL_SIZE/2;
-                      ball_y  <= SCREEN_H/2 - BALL_SIZE/2;
-                      ball_dx <= 1'b1;
-                      ball_dy <= 1'b0;
-            
-                      padl_x <= PAD_OFFS;
-                      padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
-                      padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
-                      padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
-                  end
-            
-                  // 2) OUT RIGHT? (ขอบขวา) -> left scores
-                  else if ((ball_dx) && (ball_x + BALL_SIZE + BALL_SPX >= SCREEN_W)) begin
-            
-                      if (score_left == MAX_SCORE-1) begin
-                          score_left <= score_left + 1;       // = 11
-                          win_cnt    <= WIN_DELAY_FRAMES;
-                          state      <= GAME_OVER;
-                      end else begin
-                          score_left <= score_left + 1;
-                          state      <= NEW_GAME;
-                      end
-            
-                      // reset round กันนับซ้ำ
-                      ball_x  <= SCREEN_W/2 - BALL_SIZE/2;
-                      ball_y  <= SCREEN_H/2 - BALL_SIZE/2;
-                      ball_dx <= 1'b1;
-                      ball_dy <= 1'b0;
-            
-                      padl_x <= PAD_OFFS;
-                      padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
-                      padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
-                      padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
-                  end
-            
-                  // 3) ไม่ OUT -> เดินลูก + ชน + เดินไม้
-                  else begin
-                      // ----------------- ITEM PICKUP -----------------
-                      if (item_active) begin
-                          // paddle1 intersect item ?
-                          if ((padl_x < item_x + ITEM_SIZE) && (padl_x + PAD_WIDTH > item_x) &&
-                              (padl_y < item_y + ITEM_SIZE) && (padl_y + padl_h     > item_y)) begin
-                      
-                              item_active <= 1'b0;
-                              p1_long_cnt <= POWER_FRAMES;
-                      
-                              // หน่วงก่อนเกิดใหม่
-                              spawn_pending <= 1'b0;
-                              spawn_delay_cnt <= RESPAWN_DELAY;
+                                ball_dx <= 1'b0;
+                                ball_x  <= padr_x - BALL_SIZE - 1;
 
-                
-                          end
-                          // paddle2 intersect item ?
-                          else if ((padr_x < item_x + ITEM_SIZE) && (padr_x + PAD_WIDTH > item_x) &&
-                                   (padr_y < item_y + ITEM_SIZE) && (padr_y + padr_h     > item_y)) begin
-                      
-                              item_active <= 1'b0;
-                              p2_long_cnt <= POWER_FRAMES;
-                      
-                              spawn_pending <= 1'b0;
-                              spawn_delay_cnt <= RESPAWN_DELAY;
+                                // ? speed boost only if right side has SPEED buff
+                                if (p2_speed) begin
+                                    ball_spx <= (BALL_SPX * 4) / 2;
+                                    ball_spy <= (BALL_SPY * 4) / 2;
+                                end else begin
+                                    ball_spx <= BALL_SPX;
+                                    ball_spy <= BALL_SPY;
+                                end
 
-                          end
-                      end
+                            end else begin
+                                ball_x <= ball_x + ball_spx;
+                            end
+                        end else begin // moving left
+                            if ((ball_x > padl_x + PAD_WIDTH) &&
+                                (ball_x - ball_spx <= padl_x + PAD_WIDTH) &&
+                                (ball_y + BALL_SIZE >= padl_y) &&
+                                (ball_y <= padl_y + padl_h)) begin
 
-                      // --------- Ball X ---------
-                      if (ball_dx) begin // right
-                          if ((ball_x + BALL_SIZE + BALL_SPX >= padr_x) &&
-                              (ball_y + BALL_SIZE >= padr_y) &&
-                              (ball_y <= padr_y + padr_h)) begin
-                              ball_dx <= 1'b0;
-                              ball_x  <= padr_x - BALL_SIZE - 1;
-                          end else begin
-                              ball_x <= ball_x + BALL_SPX;
-                          end
-                      end else begin // left
-                          if ((ball_x > padl_x + PAD_WIDTH) &&
-                              (ball_x - BALL_SPX <= padl_x + PAD_WIDTH) &&
-                              (ball_y + BALL_SIZE >= padl_y) &&
-                              (ball_y <= padl_y + padl_h)) begin
-                              ball_dx <= 1'b1;
-                              ball_x  <= padl_x + PAD_WIDTH + 1;
-                          end else begin
-                              ball_x <= ball_x - BALL_SPX;
-                          end
-                      end
-            
-                      // --------- Ball Y ---------
-                      if (!ball_dy) begin // down
-                          if (ball_y + BALL_SIZE + BALL_SPY >= SCREEN_H) begin
-                              ball_y  <= SCREEN_H - BALL_SIZE;
-                              ball_dy <= 1'b1;
-                          end else begin
-                              ball_y <= ball_y + BALL_SPY;
-                          end
-                      end else begin // up
-                          if (ball_y < BALL_SPY) begin
-                              ball_y  <= 0;
-                              ball_dy <= 1'b0;
-                          end else begin
-                              ball_y <= ball_y - BALL_SPY;
-                          end
-                      end
-            
-                      // --------- Player 1 (LEFT) Y ---------
-                      if (p1_dn) begin
-                          if (padl_y + padl_h + PADL_SPY >= SCREEN_H)
-                              padl_y <= SCREEN_H - padl_h;
-                          else
-                              padl_y <= padl_y + PADL_SPY;
-                      end
-                      else if (p1_up) begin
-                          if (padl_y < PADL_SPY)
-                              padl_y <= 0;
-                          else
-                              padl_y <= padl_y - PADL_SPY;
-                      end
-                      
-                      // --------- Player 1 (LEFT) X ---------
-                      if (p1_left) begin
-                          if (padl_x <= P1_X_MIN + PADL_SPX)
-                              padl_x <= P1_X_MIN;
-                          else
-                              padl_x <= padl_x - PADL_SPX;
-                      end
-                      else if (p1_right) begin
-                          if (padl_x + PADL_SPX >= P1_X_MAX)
-                              padl_x <= P1_X_MAX;
-                          else
-                              padl_x <= padl_x + PADL_SPX;
-                      end
+                                ball_dx <= 1'b1;
+                                ball_x  <= padl_x + PAD_WIDTH + 1;
 
-            
-                      // --------- Player 2 (RIGHT) Y ---------
-                      if (p2_dn) begin
-                          if (padr_y + padr_h + PADR_SPY >= SCREEN_H)
-                              padr_y <= SCREEN_H - padr_h;
-                          else
-                              padr_y <= padr_y + PADR_SPY;
-                      end else if (p2_up) begin
-                          if (padr_y < PADR_SPY)
-                              padr_y <= 0;
-                          else
-                              padr_y <= padr_y - PADR_SPY;
-                      end
-            
-                      // --------- Player 2 (RIGHT) X (ครึ่งสนาม) ---------
-                      if (p2_left) begin
-                          if (padr_x <= P2_X_MIN + PADR_SPX)
-                              padr_x <= P2_X_MIN;
-                          else
-                              padr_x <= padr_x - PADR_SPX;
-                      end else if (p2_right) begin
-                          if (padr_x + PADR_SPX >= P2_X_MAX)
-                              padr_x <= P2_X_MAX;
-                          else
-                              padr_x <= padr_x + PADR_SPX;
-                      end
-                  end
-              end
-            
-              GAME_OVER: begin
-                  // หยุดลูก/หยุดไม้: state นี้ไม่อัปเดตตำแหน่ง
-                  if (win_cnt == 0) begin
-                      score_left  <= 0;
-                      score_right <= 0;
-                      state <= NEW_GAME;
-                  end else begin
-                      win_cnt <= win_cnt - 1;
-                  end
-              end
-            
-              default: state <= NEW_GAME;
-            
+                                // ? speed boost only if left side has SPEED buff
+                                if (p1_speed) begin
+                                    ball_spx <= (BALL_SPX * 4) / 2;
+                                    ball_spy <= (BALL_SPY * 4) / 2;
+                                end else begin
+                                    ball_spx <= BALL_SPX;
+                                    ball_spy <= BALL_SPY;
+                                end
+
+                            end else begin
+                                ball_x <= ball_x - ball_spx;
+                            end
+                        end
+
+                        // --------- Ball Y ---------
+                        if (!ball_dy) begin // down
+                            if (ball_y + BALL_SIZE + ball_spy >= SCREEN_H) begin
+                                ball_y  <= SCREEN_H - BALL_SIZE;
+                                ball_dy <= 1'b1;
+                            end else begin
+                                ball_y <= ball_y + ball_spy;
+                            end
+                        end else begin // up
+                            if (ball_y < ball_spy) begin
+                                ball_y  <= 0;
+                                ball_dy <= 1'b0;
+                            end else begin
+                                ball_y <= ball_y - ball_spy;
+                            end
+                        end
+
+                        // --------- Player 1 movement (use real height) ---------
+                        if (p1_dn) begin
+                            if (padl_y + padl_h + PADL_SPY >= SCREEN_H)
+                                padl_y <= SCREEN_H - padl_h;
+                            else
+                                padl_y <= padl_y + PADL_SPY;
+                        end else if (p1_up) begin
+                            if (padl_y < PADL_SPY)
+                                padl_y <= 0;
+                            else
+                                padl_y <= padl_y - PADL_SPY;
+                        end
+
+                        if (p1_left) begin
+                            if (padl_x <= P1_X_MIN + PADL_SPX)
+                                padl_x <= P1_X_MIN;
+                            else
+                                padl_x <= padl_x - PADL_SPX;
+                        end else if (p1_right) begin
+                            if (padl_x + PADL_SPX >= P1_X_MAX)
+                                padl_x <= P1_X_MAX;
+                            else
+                                padl_x <= padl_x + PADL_SPX;
+                        end
+
+                        // --------- Player 2 movement (use real height) ---------
+                        if (p2_dn) begin
+                            if (padr_y + padr_h + PADR_SPY >= SCREEN_H)
+                                padr_y <= SCREEN_H - padr_h;
+                            else
+                                padr_y <= padr_y + PADR_SPY;
+                        end else if (p2_up) begin
+                            if (padr_y < PADR_SPY)
+                                padr_y <= 0;
+                            else
+                                padr_y <= padr_y - PADR_SPY;
+                        end
+
+                        if (p2_left) begin
+                            if (padr_x <= P2_X_MIN + PADR_SPX)
+                                padr_x <= P2_X_MIN;
+                            else
+                                padr_x <= padr_x - PADR_SPX;
+                        end else if (p2_right) begin
+                            if (padr_x + PADR_SPX >= P2_X_MAX)
+                                padr_x <= P2_X_MAX;
+                            else
+                                padr_x <= padr_x + PADR_SPX;
+                        end
+                    end
+                end
+
+                GAME_OVER: begin
+                    if (win_cnt == 0) begin
+                        score_left  <= 0;
+                        score_right <= 0;
+                        state <= NEW_GAME;
+                    end else begin
+                        win_cnt <= win_cnt - 1;
+                    end
+                end
+
+                default: state <= NEW_GAME;
             endcase
         end
     end
