@@ -1,3 +1,12 @@
+# ===================== Basys3 Pong Constraints =====================
+# - VGA: RED[3:0], GREEN[3:0], BLUE[3:0], HS, VS
+# - CLK: 100 MHz
+# - RESET: btn_reset (on-board) active-high
+# - LEDs: ledL[3:0], ledR[3:0]
+# - Player 2 Buttons: PMOD JA1-JA4 (active-low + PULLUP)
+# - Player 1 Buttons: PMOD JB1-JB4 (active-low + PULLUP)
+# ===================================================================
+
 # ===================== VGA PIN ASSIGNMENTS =======================
 
 # RED
@@ -28,57 +37,66 @@ set_property IOSTANDARD LVCMOS33 [get_ports HS]
 set_property PACKAGE_PIN R19 [get_ports VS]
 set_property IOSTANDARD LVCMOS33 [get_ports VS]
 
-# CLOCK
+# ===================== CLOCK =====================
+
 set_property PACKAGE_PIN W5 [get_ports clk]
 set_property IOSTANDARD LVCMOS33 [get_ports clk]
 create_clock -period 10.000 -name sys_clk -waveform {0.000 5.000} [get_ports clk]
 
-# BUTTONS
-set_property PACKAGE_PIN T18 [get_ports btn_up]
-set_property IOSTANDARD LVCMOS33 [get_ports btn_up]
-
-set_property PACKAGE_PIN U18 [get_ports btn_dn]
-set_property IOSTANDARD LVCMOS33 [get_ports btn_dn]
+# ===================== RESET (on-board) =====================
 
 set_property PACKAGE_PIN U17 [get_ports btn_reset]
 set_property IOSTANDARD LVCMOS33 [get_ports btn_reset]
 
-set_property IOSTANDARD LVCMOS33 [get_ports btn_left]
-set_property PACKAGE_PIN W19 [get_ports btn_left]
-set_property PACKAGE_PIN T17 [get_ports btn_right]
-set_property IOSTANDARD LVCMOS33 [get_ports btn_right]
+# ===================== LEDs =====================
 
-### Seven Segment Display
-#set_property PACKAGE_PIN W7  [get_ports {seg[0]}] ;# CA
-#set_property PACKAGE_PIN W6  [get_ports {seg[1]}] ;# CB
-#set_property PACKAGE_PIN U8  [get_ports {seg[2]}] ;# CC
-#set_property PACKAGE_PIN V8  [get_ports {seg[3]}] ;# CD
-#set_property PACKAGE_PIN U5  [get_ports {seg[4]}] ;# CE
-#set_property PACKAGE_PIN V5  [get_ports {seg[5]}] ;# CF
-#set_property PACKAGE_PIN U7  [get_ports {seg[6]}] ;# CG
+set_property IOSTANDARD LVCMOS33 [get_ports {ledL[*]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ledR[*]}]
 
-#set_property PACKAGE_PIN V7  [get_ports {dp}]     ;# DP
-
-### Digit Enable (Anodes)
-#set_property PACKAGE_PIN U2  [get_ports {an[0]}]  ;# AN0
-#set_property PACKAGE_PIN U4  [get_ports {an[1]}]  ;# AN1
-#set_property PACKAGE_PIN V4  [get_ports {an[2]}]  ;# AN2
-#set_property PACKAGE_PIN W4  [get_ports {an[3]}]  ;# AN3
-
-
-set_property IOSTANDARD LVCMOS33 [get_ports {ledL[3]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ledL[2]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ledL[1]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ledL[0]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ledR[3]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ledR[2]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ledR[1]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ledR[0]}]
 set_property PACKAGE_PIN L1 [get_ports {ledL[3]}]
 set_property PACKAGE_PIN P1 [get_ports {ledL[2]}]
 set_property PACKAGE_PIN N3 [get_ports {ledL[1]}]
 set_property PACKAGE_PIN P3 [get_ports {ledL[0]}]
+
 set_property PACKAGE_PIN V19 [get_ports {ledR[3]}]
 set_property PACKAGE_PIN U19 [get_ports {ledR[2]}]
 set_property PACKAGE_PIN E19 [get_ports {ledR[1]}]
 set_property PACKAGE_PIN U16 [get_ports {ledR[0]}]
+
+# ================= Player 2 Buttons (PMOD JA1-JA4) =================
+# active-low with internal pull-up (press = 0)
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn2_up]
+set_property PACKAGE_PIN J1 [get_ports btn2_up]     ;# JA1
+set_property PULLUP true [get_ports btn2_up]
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn2_dn]
+set_property PACKAGE_PIN L2 [get_ports btn2_dn]     ;# JA2
+set_property PULLUP true [get_ports btn2_dn]
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn2_left]
+set_property PACKAGE_PIN J2 [get_ports btn2_left]   ;# JA3
+set_property PULLUP true [get_ports btn2_left]
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn2_right]
+set_property PACKAGE_PIN G2 [get_ports btn2_right]  ;# JA4
+set_property PULLUP true [get_ports btn2_right]
+
+# ================= Player 1 Buttons (PMOD JB1-JB4) =================
+# active-low with internal pull-up (press = 0)
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn1_up]
+set_property PACKAGE_PIN A14 [get_ports btn1_up]    ;# JB1
+set_property PULLUP true [get_ports btn1_up]
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn1_dn]
+set_property PACKAGE_PIN A16 [get_ports btn1_dn]    ;# JB2
+set_property PULLUP true [get_ports btn1_dn]
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn1_left]
+set_property PACKAGE_PIN B15 [get_ports btn1_left]  ;# JB3
+set_property PULLUP true [get_ports btn1_left]
+
+set_property IOSTANDARD LVCMOS33 [get_ports btn1_right]
+set_property PACKAGE_PIN B16 [get_ports btn1_right] ;# JB4
+set_property PULLUP true [get_ports btn1_right]
