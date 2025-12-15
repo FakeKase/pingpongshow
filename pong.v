@@ -65,15 +65,15 @@ module pong(
     // Buttons: active-low -> invert to active-high
     wire p1_up, p1_dn, p1_left, p1_right;
     wire p2_up, p2_dn, p2_left, p2_right;
-    assign p1_up    = ~btn1_up;
-    assign p1_dn    = ~btn1_dn;
-    assign p1_left  = ~btn1_left;
-    assign p1_right = ~btn1_right;
+    assign p1_up    = ~btn2_up;
+    assign p1_dn    = ~btn2_dn;
+    assign p1_left  = ~btn2_left;
+    assign p1_right = ~btn2_right;
 
-    assign p2_up    = ~btn2_up;
-    assign p2_dn    = ~btn2_dn;
-    assign p2_left  = ~btn2_left;
-    assign p2_right = ~btn2_right;
+    assign p2_up    = ~btn1_up;
+    assign p2_dn    = ~btn1_dn;
+    assign p2_left  = ~btn1_left;
+    assign p2_right = ~btn1_right;
 
     // -------------------------------------------------------------------------
     // 2) Frame tick generator (~60Hz): rising edge of VS
@@ -191,6 +191,8 @@ module pong(
     reg       ball_dx;    // 1 = right, 0 = left
     reg       ball_dy;    // 1 = up,    0 = down
     reg [3:0] ball_spx, ball_spy; // current speed (base or boosted)
+    // fix ball collision 
+    reg [9:0] next_ball_x;
 
     reg [9:0] padl_x, padl_y;
     reg [9:0] padr_x, padr_y;
@@ -750,16 +752,23 @@ module pong(
                             end
                         end
 
-                        // Ball X + collision
-                        if (ball_dx) begin // right
-                            if ((ball_x + BALL_SIZE + ball_spx >= padr_x) &&
-                                (ball_y + BALL_SIZE >= padr_y) &&
-                                (ball_y <= padr_y + padr_h)) begin
 
+                        // ================= Ball X + collision (FIX tunneling / paddle push-in) =================
+                        
+                        if (ball_dx) begin
+                            // moving right
+                            next_ball_x = ball_x + ball_spx;
+                        
+                            // AABB overlap check at next position
+                            if ( (next_ball_x + BALL_SIZE >= padr_x) &&              // reach/enter paddle
+                                 (next_ball_x <= padr_x + PAD_WIDTH) &&              // overlap X
+                                 (ball_y + BALL_SIZE >= padr_y) &&
+                                 (ball_y <= padr_y + padr_h) ) begin                 // overlap Y
+                        
                                 ball_dx <= 1'b0;
-                                ball_x  <= padr_x - BALL_SIZE - 1;
-
-                                // speed boost if right side has SPEED
+                                ball_x  <= padr_x - BALL_SIZE - 1;                   // clamp outside paddle
+                        
+                                // speed boost if right has SPEED
                                 if (p2_speed) begin
                                     ball_spx <= (BALL_SPX * 3) / 2;
                                     ball_spy <= (BALL_SPY * 3) / 2;
@@ -767,20 +776,24 @@ module pong(
                                     ball_spx <= BALL_SPX;
                                     ball_spy <= BALL_SPY;
                                 end
-
                             end else begin
-                                ball_x <= ball_x + ball_spx;
+                                ball_x <= next_ball_x;
                             end
-                        end else begin // left
-                            if ((ball_x > padl_x + PAD_WIDTH) &&
-                                (ball_x - ball_spx <= padl_x + PAD_WIDTH) &&
-                                (ball_y + BALL_SIZE >= padl_y) &&
-                                (ball_y <= padl_y + padl_h)) begin
-
+                        
+                        end else begin
+                            // moving left
+                            next_ball_x = ball_x - ball_spx;
+                        
+                            // AABB overlap check at next position
+                            if ( (next_ball_x <= padl_x + PAD_WIDTH) &&              // reach/enter paddle
+                                 (next_ball_x + BALL_SIZE >= padl_x) &&              // overlap X
+                                 (ball_y + BALL_SIZE >= padl_y) &&
+                                 (ball_y <= padl_y + padl_h) ) begin                 // overlap Y
+                        
                                 ball_dx <= 1'b1;
-                                ball_x  <= padl_x + PAD_WIDTH + 1;
-
-                                // speed boost if left side has SPEED
+                                ball_x  <= padl_x + PAD_WIDTH + 1;                   // clamp outside paddle
+                        
+                                // speed boost if left has SPEED
                                 if (p1_speed) begin
                                     ball_spx <= (BALL_SPX * 3) / 2;
                                     ball_spy <= (BALL_SPY * 3) / 2;
@@ -788,11 +801,11 @@ module pong(
                                     ball_spx <= BALL_SPX;
                                     ball_spy <= BALL_SPY;
                                 end
-
                             end else begin
-                                ball_x <= ball_x - ball_spx;
+                                ball_x <= next_ball_x;
                             end
                         end
+
 
                         // Ball Y
                         if (!ball_dy) begin // down
