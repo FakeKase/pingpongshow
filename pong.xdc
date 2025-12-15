@@ -67,36 +67,39 @@ set_property PACKAGE_PIN U16 [get_ports {ledR[0]}]
 # active-low with internal pull-up (press = 0)
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn2_up]
-set_property PACKAGE_PIN J1 [get_ports btn2_up]     ;# JA1
+set_property PACKAGE_PIN J1 [get_ports btn2_up]
 set_property PULLUP true [get_ports btn2_up]
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn2_dn]
-set_property PACKAGE_PIN L2 [get_ports btn2_dn]     ;# JA2
+set_property PACKAGE_PIN L2 [get_ports btn2_dn]
 set_property PULLUP true [get_ports btn2_dn]
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn2_left]
-set_property PACKAGE_PIN J2 [get_ports btn2_left]   ;# JA3
+set_property PACKAGE_PIN J2 [get_ports btn2_left]
 set_property PULLUP true [get_ports btn2_left]
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn2_right]
-set_property PACKAGE_PIN G2 [get_ports btn2_right]  ;# JA4
+set_property PACKAGE_PIN G2 [get_ports btn2_right]
 set_property PULLUP true [get_ports btn2_right]
 
 # ================= Player 1 Buttons (PMOD JB1-JB4) =================
 # active-low with internal pull-up (press = 0)
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn1_up]
-set_property PACKAGE_PIN A14 [get_ports btn1_up]    ;# JB1
+set_property PACKAGE_PIN A14 [get_ports btn1_up]
 set_property PULLUP true [get_ports btn1_up]
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn1_dn]
-set_property PACKAGE_PIN A16 [get_ports btn1_dn]    ;# JB2
+set_property PACKAGE_PIN A16 [get_ports btn1_dn]
 set_property PULLUP true [get_ports btn1_dn]
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn1_left]
-set_property PACKAGE_PIN B15 [get_ports btn1_left]  ;# JB3
+set_property PACKAGE_PIN B15 [get_ports btn1_left]
 set_property PULLUP true [get_ports btn1_left]
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn1_right]
-set_property PACKAGE_PIN B16 [get_ports btn1_right] ;# JB4
+set_property PACKAGE_PIN B16 [get_ports btn1_right]
 set_property PULLUP true [get_ports btn1_right]
+
+set_property IOSTANDARD LVCMOS33 [get_ports pause]
+set_property PACKAGE_PIN V17 [get_ports pause]
