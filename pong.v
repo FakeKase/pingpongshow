@@ -128,11 +128,17 @@ module pong(
     localparam NEW_GAME  = 2'b00;
     localparam PLAY      = 2'b01;
     localparam GAME_OVER = 2'b10;
-    localparam integer WIN_DELAY_FRAMES = 60;
+    localparam integer WIN_DELAY_FRAMES = 60*4;
     reg [15:0] win_cnt;
+    // delay start at first game
+    localparam integer START_DELAY_FRAMES = 60 * 10; // 10 วินาที
+    reg [15:0] start_cnt;
+    reg first_start;
+
 
     // winner latch for GAME_OVER screen
     reg winner_left; // 1 => left wins, 0 => right wins
+    reg serve_left; // 1 = ฝั่งซ้าย serve, 0 = ฝั่งขวา serve
 
     // Score rendering
     localparam SCORE_SCALE   = 6;
@@ -530,6 +536,10 @@ module pong(
     // -------------------------------------------------------------------------
     always @(posedge clk) begin
         if (btn_reset) begin
+            first_start <= 1'b1;
+            start_cnt   <= START_DELAY_FRAMES;
+            serve_left <= 1'b1;   // เริ่มเกมให้ซ้าย serve ก่อน (หรือจะ 0 ก็ได้)
+
             state <= NEW_GAME;
 
             padl_x <= PAD_OFFS;
@@ -617,23 +627,34 @@ module pong(
             case (state)
 
                 NEW_GAME: begin
-                    ball_x <= SCREEN_W/2 - BALL_SIZE/2;
+                  if (first_start && start_cnt != 0) begin
+                      start_cnt <= start_cnt - 1;
+                  end else begin
+                      first_start <= 1'b0;
+                      // ====== สลับ serve ทุกครั้ง ======
+                      serve_left <= ~serve_left;
+                    // ตำแหน่งบอลตามฝั่ง serve
+                    ball_x <= serve_left
+                              ? (PAD_OFFS + PAD_WIDTH + 2)
+                              : (SCREEN_W - PAD_OFFS - PAD_WIDTH - BALL_SIZE - 2);
                     ball_y <= SCREEN_H/2 - BALL_SIZE/2;
 
+                    //reset paddles
                     padl_x <= PAD_OFFS;
                     padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
-
                     padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
                     padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
 
-                    ball_dx  <= 1'b1;
-                    ball_dy  <= 1'b0;
+                     // ทิศบอลตามฝั่ง serve
+                     ball_dx <= serve_left ? 1'b1 : 1'b0;
+                     ball_dy <= 1'b0;
 
                     // reset speed base
                     ball_spx <= BALL_SPX;
                     ball_spy <= BALL_SPY;
 
                     state <= PLAY;
+                    end
                 end
 
                 PLAY: begin
