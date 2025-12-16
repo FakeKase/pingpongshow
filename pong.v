@@ -1,25 +1,4 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Pong for Basys-3 - 2 Players (VGA score on-screen)
-//
-// PAUSE:
-// - pause=1 freezes ALL game state updates (ball/paddles/items/timers/FSM/spawn)
-// - VGA still renders the frozen frame
-// - LEDs still show score while paused
-//
-// DECOY (FIXED FOR REAL):
-// - Pick up DECOY => set preactive flag for that side (NO decoy spawned yet)
-// - Preactive stays ON until that side HITS THE REAL BALL (paddle collision)
-// - On that hit: spawn ONE decoy ball (if decoy already active, keep preactive ON)
-// - Decoy behavior:
-//     * GREEN
-//     * bounce only on TOP/BOTTOM
-//     * disappears if it collides with either paddle
-//     * disappears if it goes out LEFT or RIGHT edge (NO X bounce)
-// - IMPORTANT BUGFIXES:
-//     * separate stored decoy velocity per side (P1 vs P2) so pickups don't overwrite
-//     * small "spawn grace" (2 frames) so the decoy doesn't instantly self-collide at spawn
-//////////////////////////////////////////////////////////////////////////////////
 
 module pong(
     input  clk,
@@ -49,9 +28,7 @@ module pong(
     input  btn2_right
 );
 
-    // -------------------------------------------------------------------------
-    // 1) VGA interface
-    // -------------------------------------------------------------------------
+    // vga interface
     wire [9:0] x, y;
     wire blank;
     reg  [11:0] color;
@@ -66,11 +43,9 @@ module pong(
         .blank(blank)
     );
 
-    // Buttons: active-low -> invert to active-high
     wire p1_up, p1_dn, p1_left, p1_right;
     wire p2_up, p2_dn, p2_left, p2_right;
 
-    // NOTE: mapping kept as you wrote (swapped sides).
     assign p1_up    = ~btn2_up;
     assign p1_dn    = ~btn2_dn;
     assign p1_left  = ~btn2_left;
@@ -81,9 +56,7 @@ module pong(
     assign p2_left  = ~btn1_left;
     assign p2_right = ~btn1_right;
 
-    // -------------------------------------------------------------------------
-    // 2) Frame tick generator (~60Hz): rising edge of VS
-    // -------------------------------------------------------------------------
+    // frame tick gen
     reg VS_old;
     wire frame_tick;
 
@@ -93,9 +66,7 @@ module pong(
 
     assign frame_tick = (VS == 1'b1) && (VS_old == 1'b0);
 
-    // -------------------------------------------------------------------------
-    // 3) Game parameters
-    // -------------------------------------------------------------------------
+    // all parameters
     localparam SCREEN_W = 640;
     localparam SCREEN_H = 480;
 
@@ -103,7 +74,7 @@ module pong(
     localparam PADL_HEIGHT = 48;
     localparam PADR_HEIGHT = 48;
 
-    localparam MID_X = SCREEN_W/2;      // 320
+    localparam MID_X = SCREEN_W/2;   //half screen clamps
     localparam GAP   = 4;
 
     localparam P1_X_MIN = 0;
@@ -130,7 +101,7 @@ module pong(
 
     localparam MAX_SCORE = 11;
 
-    // FSM
+    // State
     localparam NEW_GAME  = 2'b00;
     localparam PLAY      = 2'b01;
     localparam GAME_OVER = 2'b10;
@@ -150,7 +121,7 @@ module pong(
     localparam P1_SCORE_X = LINE_X0 - SCORE_MARGIN - DOUBLE_W;
     localparam P2_SCORE_X = LINE_X0 + LINE_W + SCORE_MARGIN;
 
-    // ----------------- ITEM (Power-up) -----------------
+    // items
     localparam ITEM_SIZE   = 12;
     localparam ITEM_MARGIN = 8;
 
@@ -164,7 +135,7 @@ module pong(
     localparam [2:0] ITEM_SLOW  = 3'd2;
     localparam [2:0] ITEM_DECOY = 3'd3;
 
-    // ----------------- GAME OVER TEXT (5x7 font scaled) -----------------
+    // Ending message
     localparam MSG_SCALE   = 10;
     localparam MSG_CHAR_W  = 5 * MSG_SCALE;
     localparam MSG_CHAR_H  = 7 * MSG_SCALE;
@@ -181,9 +152,7 @@ module pong(
     localparam integer RIGHT_WIN_X0  = MID_X + (MID_X/2) - (WIN_W/2);
     localparam integer RIGHT_LOSE_X0 = MID_X + (MID_X/2) - (LOSE_W/2);
 
-    // -------------------------------------------------------------------------
-    // 4) State registers
-    // -------------------------------------------------------------------------
+   
     reg [1:0] state;
 
     reg [9:0] ball_x, ball_y;
@@ -202,10 +171,9 @@ module pong(
     reg [15:0] start_cnt;
     reg first_start;
 
-    reg winner_left; // 1 => left wins, 0 => right wins
-    reg serve_left;  // 1 => left serve, 0 => right serve
+    reg winner_left; // 1 = left wins
+    reg serve_left;  // 1 = left serve
 
-    // ITEM regs
     reg        item_active;
     reg        spawn_pending;
     reg [2:0]  item_type;
@@ -220,16 +188,15 @@ module pong(
 
     // Decoy regs
     reg        decoy_active;
-    reg        padl_preactive, padr_preactive; // stored until next REAL BALL hit
+    reg        padl_preactive, padr_preactive; 
     reg [9:0]  decoy_x, decoy_y;
     reg signed [10:0] decoy_vx, decoy_vy;
-    reg [1:0]  decoy_grace; // ignore paddle-collide right after spawn
+    reg [1:0]  decoy_grace; // prevent early collision with it own paddle
 
-    // Store decoy velocity PER SIDE (bugfix: no overwrite)
     reg signed [10:0] p1_decoy_vx, p1_decoy_vy;
     reg signed [10:0] p2_decoy_vx, p2_decoy_vy;
 
-    // effect flags + real paddle heights
+    // isEffected?
     wire p1_long, p2_long, p1_speed, p2_speed, p1_slowed, p2_slowed;
     assign p1_long   = (p1_long_cnt  != 0);
     assign p2_long   = (p2_long_cnt  != 0);
@@ -242,7 +209,7 @@ module pong(
     assign padl_h = p1_long ? (PADL_HEIGHT*2) : PADL_HEIGHT;
     assign padr_h = p2_long ? (PADR_HEIGHT*2) : PADR_HEIGHT;
 
-    // effective paddle move speed (0.75x when slowed)
+    // slow
     wire [3:0] p1_spx_eff, p1_spy_eff, p2_spx_eff, p2_spy_eff;
     assign p1_spx_eff = p1_slowed ? ((PADL_SPX * 3) / 4) : PADL_SPX;
     assign p1_spy_eff = p1_slowed ? ((PADL_SPY * 3) / 4) : PADL_SPY;
@@ -250,14 +217,12 @@ module pong(
     assign p2_spx_eff = p2_slowed ? ((PADR_SPX * 3) / 4) : PADR_SPX;
     assign p2_spy_eff = p2_slowed ? ((PADR_SPY * 3) / 4) : PADR_SPY;
 
-    // candidate spawn from LFSR
+    // tentative spawn point
     wire [9:0] cand_x, cand_y;
     assign cand_x = (lfsr[9:0]  % (SCREEN_W - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
     assign cand_y = (lfsr[15:6] % (SCREEN_H - 2*ITEM_MARGIN - ITEM_SIZE)) + ITEM_MARGIN;
 
-    // -------------------------------------------------------------------------
-    // 5) Digit bitmap (5x7 = 35 bits)
-    // -------------------------------------------------------------------------
+   //print score & ending (bitmap)
     function [34:0] digit_bitmap;
         input [3:0] value;
         begin
@@ -277,7 +242,6 @@ module pong(
         end
     endfunction
 
-    // GAME_OVER letter bitmaps (5x7)
     localparam [34:0] BM_W = 35'b10001_10001_10001_10101_10101_11011_10001;
     localparam [34:0] BM_I = 35'b11111_00100_00100_00100_00100_00100_11111;
     localparam [34:0] BM_N = 35'b10001_11001_10101_10011_10001_10001_10001;
@@ -312,7 +276,7 @@ module pong(
         end
     endfunction
 
-    // score digits
+    //score 
     wire [3:0] sl_tens = score_left / 10;
     wire [3:0] sl_ones = score_left % 10;
     wire [3:0] sr_tens = score_right / 10;
@@ -332,9 +296,7 @@ module pong(
     integer msg_x0;
     integer word_is_win;
 
-    // -------------------------------------------------------------------------
-    // 6) Rendering (combinational)
-    // -------------------------------------------------------------------------
+    // rendering
     always @(*) begin
         color    = 12'h000;
 
@@ -423,7 +385,6 @@ module pong(
                 end
             end
         end else begin
-            // score digits (same as your code, shortened by using DIGIT_H=7*SCORE_SCALE)
             if ((x >= P1_SCORE_X) &&
                 (x <  P1_SCORE_X + ((score_left >= 10) ? DOUBLE_W : DIGIT_W)) &&
                 (y >= SCORE_Y) &&
@@ -508,13 +469,13 @@ module pong(
                         ITEM_LONG :  color = 12'hF00;
                         ITEM_SPEED:  color = 12'h0FF;
                         ITEM_SLOW :  color = 12'hFF0;
-                        default  :   color = 12'hbf40bf; // DECOY item box
+                        default  :   color = 12'hbf40bf; // DECOY
                     endcase
                 end
                 else if (ball_pix)
-                    color = 12'h0F0;      // real ball
+                    color = 12'h0F0; 
                 else if (decoy_pix)
-                    color = 12'h0F0;      // decoy ball
+                    color = 12'h0F0; 
                 else if (padl_pix || padr_pix)
                     color = 12'hFFF;
                 else
@@ -527,9 +488,7 @@ module pong(
     assign GREEN = (blank ? 4'b0000 : color[7:4]);
     assign BLUE  = (blank ? 4'b0000 : color[3:0]);
 
-    // -------------------------------------------------------------------------
-    // 7) Game update (sequential) - update only on frame_tick
-    // -------------------------------------------------------------------------
+   //in game
     integer signed dx_tmp;
     integer signed dy_tmp;
 
@@ -594,15 +553,13 @@ module pong(
             spawn_delay_cnt <= 0;
 
         end else if (frame_tick) begin
-            // LEDs keep showing score even during pause
             ledL <= score_left[3:0];
             ledR <= score_right[3:0];
 
             if (!pause) begin
-                // LFSR update
                 lfsr <= {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
 
-                // countdown effects
+                // effect durations
                 if (p1_long_cnt  != 0) p1_long_cnt  <= p1_long_cnt  - 1;
                 if (p2_long_cnt  != 0) p2_long_cnt  <= p2_long_cnt  - 1;
                 if (p1_speed_cnt != 0) p1_speed_cnt <= p1_speed_cnt - 1;
@@ -610,7 +567,7 @@ module pong(
                 if (p1_slow_cnt  != 0) p1_slow_cnt  <= p1_slow_cnt  - 1;
                 if (p2_slow_cnt  != 0) p2_slow_cnt  <= p2_slow_cnt  - 1;
 
-                // spawn delay + request spawn
+                // spawn delay , request spawn
                 if (!item_active) begin
                     if (spawn_delay_cnt != 0)
                         spawn_delay_cnt <= spawn_delay_cnt - 1;
@@ -618,7 +575,6 @@ module pong(
                         spawn_pending <= 1'b1;
                 end
 
-                // if pending, try place this frame
                 if (spawn_pending) begin
                     if (!is_bad_spawn(cand_x, cand_y)) begin
                         item_x <= cand_x;
@@ -637,7 +593,6 @@ module pong(
                     end
                 end
 
-                // decoy grace countdown
                 if (decoy_grace != 0)
                     decoy_grace <= decoy_grace - 1;
 
@@ -654,7 +609,7 @@ module pong(
                                       : (SCREEN_W - PAD_OFFS - PAD_WIDTH - BALL_SIZE - 2);
                             ball_y <= SCREEN_H/2 - BALL_SIZE/2;
 
-                            // reset paddles
+                            
                             padl_x <= PAD_OFFS;
                             padr_x <= SCREEN_W - PAD_OFFS - PAD_WIDTH;
                             padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
@@ -663,7 +618,7 @@ module pong(
                             ball_dx <= serve_left ? 1'b1 : 1'b0;
                             ball_dy <= 1'b0;
 
-                            // reset speed base
+                            
                             ball_spx <= BALL_SPX;
                             ball_spy <= BALL_SPY;
 
@@ -672,7 +627,6 @@ module pong(
                     end
 
                     PLAY: begin
-                        // OUT LEFT?
                         if ((!ball_dx) && (ball_x < ball_spx)) begin
                             if (score_right == MAX_SCORE-1) begin
                                 score_right <= score_right + 1;
@@ -697,7 +651,7 @@ module pong(
                             padl_y <= (SCREEN_H - PADL_HEIGHT)/2;
                             padr_y <= (SCREEN_H - PADR_HEIGHT)/2;
                         end
-                        // OUT RIGHT?
+
                         else if ((ball_dx) && (ball_x + BALL_SIZE + ball_spx >= SCREEN_W)) begin
                             if (score_left == MAX_SCORE-1) begin
                                 score_left  <= score_left + 1;
@@ -725,7 +679,6 @@ module pong(
                         else begin
                             // ITEM PICKUP
                             if (item_active) begin
-                                // paddle1 pickup
                                 if ((padl_x < item_x + ITEM_SIZE) && (padl_x + PAD_WIDTH > item_x) &&
                                     (padl_y < item_y + ITEM_SIZE) && (padl_y + padl_h     > item_y)) begin
 
@@ -754,7 +707,6 @@ module pong(
                                     spawn_pending   <= 1'b0;
                                     spawn_delay_cnt <= RESPAWN_DELAY;
                                 end
-                                // paddle2 pickup
                                 else if ((padr_x < item_x + ITEM_SIZE) && (padr_x + PAD_WIDTH > item_x) &&
                                          (padr_y < item_y + ITEM_SIZE) && (padr_y + padr_h     > item_y)) begin
 
@@ -785,7 +737,7 @@ module pong(
                                 end
                             end
 
-                            // ================= Ball X + collision (tunneling-safe) =================
+                            // paddle/ball collsion
                             if (ball_dx) begin
                                 next_ball_x = ball_x + ball_spx;
 
@@ -798,17 +750,16 @@ module pong(
                                     ball_dx <= 1'b0;
                                     ball_x  <= padr_x - BALL_SIZE - 1;
 
-                                    // spawn decoy if right preactive AND decoy not active
-                                    // if decoy is active -> keep preactive (so it can spawn later)
+                                    //spawn decoy
                                     if (padr_preactive && !decoy_active) begin
                                         decoy_active <= 1'b1;
                                         decoy_grace  <= 2'd2;
 
-                                        // spawn a bit away from paddle to avoid instant overlap
+                                
                                         decoy_x <= (padr_x > (DECOY_SIZE+6)) ? (padr_x - DECOY_SIZE - 6) : 10'd0;
                                         decoy_y <= (ball_y + 2);
 
-                                        decoy_vx <= p2_decoy_vx; // negative by construction
+                                        decoy_vx <= p2_decoy_vx;
                                         decoy_vy <= p2_decoy_vy;
 
                                         padr_preactive <= 1'b0;
@@ -837,8 +788,7 @@ module pong(
                                     ball_dx <= 1'b1;
                                     ball_x  <= padl_x + PAD_WIDTH + 1;
 
-                                    // spawn decoy if left preactive AND decoy not active
-                                    // if decoy is active -> keep preactive (so it can spawn later)
+                                   
                                     if (padl_preactive && !decoy_active) begin
                                         decoy_active <= 1'b1;
                                         decoy_grace  <= 2'd2;
@@ -846,7 +796,7 @@ module pong(
                                         decoy_x <= padl_x + PAD_WIDTH + 6;
                                         decoy_y <= (ball_y + 2);
 
-                                        decoy_vx <= p1_decoy_vx; // positive by construction
+                                        decoy_vx <= p1_decoy_vx;
                                         decoy_vy <= p1_decoy_vy;
 
                                         padl_preactive <= 1'b0;
@@ -881,16 +831,17 @@ module pong(
                                 end
                             end
 
-                            // ---------------- DECOY BALL UPDATE (YOUR RULES) ----------------
+                            
+                            //decoy
                             if (decoy_active) begin
                                 dx_tmp = $signed({1'b0, decoy_x}) + decoy_vx;
                                 dy_tmp = $signed({1'b0, decoy_y}) + decoy_vy;
 
-                                // left/right edge => disappear (NO X bounce)
+                                // if out
                                 if (dx_tmp <= 0 || (dx_tmp + DECOY_SIZE) >= SCREEN_W) begin
                                     decoy_active <= 1'b0;
                                 end else begin
-                                    // top/bottom bounce only
+                                    // top/bottom bounce
                                     if (dy_tmp <= 0) begin
                                         dy_tmp   = 0;
                                         decoy_vy <= -decoy_vy;
@@ -902,7 +853,7 @@ module pong(
                                     decoy_x <= dx_tmp[9:0];
                                     decoy_y <= dy_tmp[9:0];
 
-                                    // collide with either paddle => disappear (after grace)
+                                    // if hit paddle
                                     if (decoy_grace == 0) begin
                                         if ( (dx_tmp < (padr_x + PAD_WIDTH)) && ((dx_tmp + DECOY_SIZE) > padr_x) &&
                                              (dy_tmp < (padr_y + padr_h))     && ((dy_tmp + DECOY_SIZE) > padr_y) )

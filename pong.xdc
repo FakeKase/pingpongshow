@@ -1,14 +1,3 @@
-# ===================== Basys3 Pong Constraints =====================
-# - VGA: RED[3:0], GREEN[3:0], BLUE[3:0], HS, VS
-# - CLK: 100 MHz
-# - RESET: btn_reset (on-board) active-high
-# - LEDs: ledL[3:0], ledR[3:0]
-# - Player 2 Buttons: PMOD JA1-JA4 (active-low + PULLUP)
-# - Player 1 Buttons: PMOD JB1-JB4 (active-low + PULLUP)
-# ===================================================================
-
-# ===================== VGA PIN ASSIGNMENTS =======================
-
 # RED
 set_property IOSTANDARD LVCMOS33 [get_ports {RED[*]}]
 set_property PACKAGE_PIN G19 [get_ports {RED[0]}]
@@ -37,18 +26,18 @@ set_property IOSTANDARD LVCMOS33 [get_ports HS]
 set_property PACKAGE_PIN R19 [get_ports VS]
 set_property IOSTANDARD LVCMOS33 [get_ports VS]
 
-# ===================== CLOCK =====================
+# CLOCK
 
 set_property PACKAGE_PIN W5 [get_ports clk]
 set_property IOSTANDARD LVCMOS33 [get_ports clk]
 create_clock -period 10.000 -name sys_clk -waveform {0.000 5.000} [get_ports clk]
 
-# ===================== RESET (on-board) =====================
+# RESET
 
 set_property PACKAGE_PIN U17 [get_ports btn_reset]
 set_property IOSTANDARD LVCMOS33 [get_ports btn_reset]
 
-# ===================== LEDs =====================
+# LEDs
 
 set_property IOSTANDARD LVCMOS33 [get_ports {ledL[*]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ledR[*]}]
@@ -63,8 +52,7 @@ set_property PACKAGE_PIN U19 [get_ports {ledR[2]}]
 set_property PACKAGE_PIN E19 [get_ports {ledR[1]}]
 set_property PACKAGE_PIN U16 [get_ports {ledR[0]}]
 
-# ================= Player 2 Buttons (PMOD JA1-JA4) =================
-# active-low with internal pull-up (press = 0)
+# P2
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn2_up]
 set_property PACKAGE_PIN J1 [get_ports btn2_up]
@@ -82,8 +70,7 @@ set_property IOSTANDARD LVCMOS33 [get_ports btn2_right]
 set_property PACKAGE_PIN G2 [get_ports btn2_right]
 set_property PULLUP true [get_ports btn2_right]
 
-# ================= Player 1 Buttons (PMOD JB1-JB4) =================
-# active-low with internal pull-up (press = 0)
+# P1
 
 set_property IOSTANDARD LVCMOS33 [get_ports btn1_up]
 set_property PACKAGE_PIN A14 [get_ports btn1_up]
